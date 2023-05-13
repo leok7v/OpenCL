@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define CL_TARGET_OPENCL_VERSION 300
+
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
 #else
