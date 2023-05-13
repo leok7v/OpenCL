@@ -19,10 +19,10 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
+    <ClCompile Include="..\main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="vector_add_kernel.cl" />
+    <None Include="..\vector_add_kernel.cl" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{393CFEE4-D610-4966-8727-5F970F50FB21}</ProjectGuid>
