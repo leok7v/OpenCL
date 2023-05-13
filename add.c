@@ -19,9 +19,9 @@ static cl_int x_add_y(ocl_context_t* c, ocl_command_queue_t q, ocl_kernel_t k,
         ocl.unmap(q, my, y);
     }
     ocl_arg_t args[] =
-        {{mx, sizeof(ocl_memory_t)},
-         {my, sizeof(ocl_memory_t)},
-         {mz, sizeof(ocl_memory_t)}
+        {{&mx, sizeof(ocl_memory_t)},
+         {&my, sizeof(ocl_memory_t)},
+         {&mz, sizeof(ocl_memory_t)}
     };
     ocl_event_t completion = ocl.enqueue_range_kernel(c, q, k, N, 0,
         countof(args), args);

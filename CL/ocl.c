@@ -217,7 +217,7 @@ static ocl_event_t ocl_enqueue_range_kernel(ocl_context_t* c, ocl_command_queue_
         items_in_work_group = ocl.devices[c->device_index].max_work_group;
     }
     for (int i = 0; i < argc; i++) {
-        fatal_if(clSetKernelArg((cl_kernel)k, i, argv[i].bytes, &argv[i].p) != 0);
+        fatal_if(clSetKernelArg((cl_kernel)k, i, argv[i].bytes, argv[i].p) != 0);
     }
     cl_event completion = null;
     int r = clEnqueueNDRangeKernel((cl_command_queue)q, (cl_kernel)k,
