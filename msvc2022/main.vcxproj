@@ -20,7 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\CL\ocl.c" />
-    <ClCompile Include="..\main.cpp" />
+    <ClCompile Include="..\main.c" />
     <ClCompile Include="..\rt.c" />
   </ItemGroup>
   <ItemGroup>
