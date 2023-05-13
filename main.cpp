@@ -8,12 +8,13 @@
 #else
 #include <CL/cl.h>
 #endif
+#include <CL/ocl.h>
 
 #define MAX_SOURCE_SIZE (0x100000)
 
 int main(void) {
 	printf("started running\n");
-
+    ocl.init();
     // Create the two input vectors
     int i;
     const int LIST_SIZE = 1024;
@@ -59,7 +60,7 @@ int main(void) {
  	printf("ret at %d is %d\n", __LINE__, ret);
 
     // Create a command queue
-    cl_command_queue command_queue = clCreateCommandQueue(context, device_id, 0, &ret);
+    cl_command_queue command_queue = clCreateCommandQueueWithProperties(context, device_id, 0, &ret);
  	printf("ret at %d is %d\n", __LINE__, ret);
 
     // Create memory buffers on the device for each vector
@@ -113,12 +114,12 @@ int main(void) {
     size_t local_item_size = 64; // Divide work items into groups of 64
     ret = clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL,
             &global_item_size, &local_item_size, 0, NULL, NULL);
- printf("after execution\n");
+     printf("after execution\n");
     // Read the memory buffer C on the device to the local variable C
     int *C = (int*)malloc(sizeof(int)*LIST_SIZE);
     ret = clEnqueueReadBuffer(command_queue, c_mem_obj, CL_TRUE, 0,
             LIST_SIZE * sizeof(int), C, 0, NULL, NULL);
- printf("after copying\n");
+    printf("after copying\n");
     // Display the result to the screen
     for(i = 0; i < LIST_SIZE; i++)
         printf("%d + %d = %d\n", A[i], B[i], C[i]);

@@ -2,8 +2,45 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="..\main.cpp" />
+    <ClCompile Include="..\CL\ocl.c">
+      <Filter>CL</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rt.c">
+      <Filter>rt</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\vector_add_kernel.cl" />
+    <None Include="..\CL\cl_bind.inc">
+      <Filter>CL</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\CL\cl.h">
+      <Filter>CL</Filter>
+    </ClInclude>
+    <ClInclude Include="..\CL\cl_platform.h">
+      <Filter>CL</Filter>
+    </ClInclude>
+    <ClInclude Include="..\CL\cl_version.h">
+      <Filter>CL</Filter>
+    </ClInclude>
+    <ClInclude Include="..\CL\ocl.h">
+      <Filter>CL</Filter>
+    </ClInclude>
+    <ClInclude Include="..\rt.h">
+      <Filter>rt</Filter>
+    </ClInclude>
+    <ClInclude Include="..\CL\opencl.h">
+      <Filter>CL</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CL">
+      <UniqueIdentifier>{02e8c838-6e40-4338-a9ba-abec80228a36}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="rt">
+      <UniqueIdentifier>{50bd1a1c-84d8-413d-a33e-b587131ba110}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>
