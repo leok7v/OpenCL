@@ -26,9 +26,11 @@ static void ocl_error_notify(const char * errinfo,
     (void)user_data;
 }
 
-static void ocl_open(ocl_context_t* c, int32_t device_index) {
-    call(!(0 <= device_index && device_index < ocl.device_count));
-    ocl_device_t* d = &ocl.devices[device_index];
+static void* ocl_create_queue(ocl_context_t* c, bool profile);
+
+static void ocl_open(ocl_context_t* c, int32_t ix, bool profile) {
+    call(!(0 <= ix && ix < ocl.count));
+    ocl_device_t* d = &ocl.devices[ix];
     cl_context_properties properties[] = {
         CL_CONTEXT_PLATFORM, (cl_context_properties)d->platform, 0
     };
@@ -37,14 +39,15 @@ static void ocl_open(ocl_context_t* c, int32_t device_index) {
     cl_context ctx = clCreateContext(properties, 1, &id, ocl_error_notify,
         /* user_data: */ null, &r);
     not_null(ctx, r);
-    c->ctx = ctx;
-    c->device_index = device_index;
+    c->c = ctx;
+    c->ix = ix;
+    c->q = ocl_create_queue(c, profile);
+    c->profile = profile;
 }
 
-static ocl_queue_t ocl_create_queue(ocl_context_t* c,
-        bool profiling) {
-    cl_context ctx = c->ctx;
-    cl_device_id device_id = (cl_device_id)ocl.devices[c->device_index].id;
+static void* ocl_create_queue(ocl_context_t* c, bool profiling) {
+    cl_context ctx = c->c;
+    cl_device_id device_id = (cl_device_id)ocl.devices[c->ix].id;
     cl_int r = 0;
     static cl_command_queue_properties properties[] = {
         CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0
@@ -52,27 +55,27 @@ static ocl_queue_t ocl_create_queue(ocl_context_t* c,
     cl_command_queue q = clCreateCommandQueueWithProperties(ctx, device_id,
             profiling ? properties : null, &r);
     not_null(q, r);
-    return (ocl_queue_t)q;
+    return q;
 }
 
-static void ocl_flush(ocl_queue_t q) {
-    call(clFlush((cl_command_queue)q));
+static void ocl_flush(ocl_context_t* c) {
+    call(clFlush((cl_command_queue)c->q));
 }
 
-static void ocl_finish(ocl_queue_t q) {
-    call(clFinish((cl_command_queue)q));
+static void ocl_finish(ocl_context_t* c) {
+    call(clFinish((cl_command_queue)c->q));
 }
 
-static void ocl_dispose_queue(ocl_queue_t q) {
-    call(clReleaseCommandQueue((cl_command_queue)q));
+static void ocl_dispose_queue(ocl_context_t* c) {
+    call(clReleaseCommandQueue((cl_command_queue)c->q));
 }
 
 // https://streamhpc.com/blog/2013-02-03/opencl-basics-flags-for-the-creating-memory-objects/
 // https://man.opencl.org/clCreateBuffer.html
 
-static ocl_memory_t ocl_allocate(ocl_context_t* c, int flags, size_t bytes) {
+static ocl_memory_t ocl_allocate(ocl_context_t* c, int access, size_t bytes) {
     cl_int r = 0;
-    cl_mem m = clCreateBuffer(c->ctx, flags|CL_MEM_ALLOC_HOST_PTR, bytes, null, &r);
+    cl_mem m = clCreateBuffer(c->c, access|CL_MEM_ALLOC_HOST_PTR, bytes, null, &r);
     not_null(m, r);
     return (ocl_memory_t)m;
 }
@@ -81,27 +84,27 @@ static void  ocl_deallocate(ocl_memory_t m) {
     call(clReleaseMemObject((cl_mem)m));
 }
 
-static void* ocl_map(ocl_queue_t q, int flags, ocl_memory_t m, size_t offset,
+static void* ocl_map(ocl_context_t* c, int access, ocl_memory_t m, size_t offset,
         size_t bytes) {
     cl_int r = 0;
     // blocking_map: true sync mapping
-    void* a = clEnqueueMapBuffer((cl_command_queue)q, (cl_mem)m,
-        /*blocking_map: */ true, flags, offset, bytes, 0, null, null, &r);
+    void* a = clEnqueueMapBuffer((cl_command_queue)c->q, (cl_mem)m,
+        /*blocking_map: */ true, access, offset, bytes, 0, null, null, &r);
     not_null(a, r);
     return a;
 }
 
-static void  ocl_unmap(ocl_queue_t q, ocl_memory_t m, const void* a) {
-    call(clEnqueueUnmapMemObject((cl_command_queue)q, (cl_mem)m, (void*)a,
+static void  ocl_unmap(ocl_context_t* c, ocl_memory_t m, const void* a) {
+    call(clEnqueueUnmapMemObject((cl_command_queue)c->q, (cl_mem)m, (void*)a,
         0, null, null));
 }
 
 static ocl_program_t ocl_compile_program(ocl_context_t* c, const char* code, size_t bytes) {
     cl_int r = 0;
-    cl_program p = clCreateProgramWithSource(c->ctx, 1, &code, &bytes, &r);
+    cl_program p = clCreateProgramWithSource(c->c, 1, &code, &bytes, &r);
     not_null(p, r);
     // Build the program
-    cl_device_id device_id = (cl_device_id)ocl.devices[c->device_index].id;
+    cl_device_id device_id = (cl_device_id)ocl.devices[c->ix].id;
     r = clBuildProgram(p, 1, &device_id, null, null, null);
     if (r != 0) {
         traceln("clBuildProgram() failed %s", ocl.error(r));
@@ -125,7 +128,7 @@ static ocl_kernel_t ocl_create_kernel(ocl_program_t p, const char* name) {
     return (ocl_kernel_t)k;
 }
 
-static ocl_event_t ocl_enqueue_range_kernel(ocl_context_t* c, ocl_queue_t q,
+static ocl_event_t ocl_enqueue_range_kernel(ocl_context_t* c,
         ocl_kernel_t k, size_t groups, size_t items_per_group,
         int argc, ocl_arg_t argv[]) {
     for (int i = 0; i < argc; i++) {
@@ -133,10 +136,10 @@ static ocl_event_t ocl_enqueue_range_kernel(ocl_context_t* c, ocl_queue_t q,
     }
     cl_event completion = null;
     size_t total = groups * items_per_group;
-    ocl_device_t* d = &ocl.devices[c->device_index]; (void)d;
+    ocl_device_t* d = &ocl.devices[c->ix]; (void)d;
     assertion((int64_t)groups <= d->max_groups);
     assertion((int64_t)items_per_group <= d->max_items[0]);
-    call(clEnqueueNDRangeKernel((cl_command_queue)q, (cl_kernel)k,
+    call(clEnqueueNDRangeKernel((cl_command_queue)c->q, (cl_kernel)k,
             1, null, &total, &items_per_group, 0, null, &completion));
     return (ocl_event_t)completion;
 }
@@ -151,14 +154,20 @@ static void ocl_profile(ocl_event_t e, ocl_profiling_t* p, int64_t items) {
     get_info(CL_PROFILING_COMMAND_START, p->start);
     get_info(CL_PROFILING_COMMAND_END, p->end);
     #pragma pop_macro("get_info")
+    uint64_t ema_samples = p->ema_samples == 0 ? 128 : p->ema_samples;
+    // exponential moving average of 128 samples
+    const double ema_alpha = 1.0 / (double)ema_samples;
     p->time = (p->end - p->start) / (double)NSEC_IN_SEC;
     if (items != 0) {
         double seconds_per_item = p->time / items;
         double ops_per_second = 1.0 / seconds_per_item;
         p->gops = ops_per_second / (1000 * 1000 * 1000);
+        p->ema.gops = p->ema.gops * (1.0 - ema_alpha) + p->gops * ema_alpha;
     } else {
         p->gops = 0; // cannot determine for unknown number of items
     }
+    p->ema.time = p->ema.time * (1.0 - ema_alpha) + p->time * ema_alpha;
+    // client is responsible updating and calculating .user fields
 }
 
 static void ocl_wait(ocl_event_t* events, int count) {
@@ -176,7 +185,7 @@ static void ocl_dispose_kernel(ocl_kernel_t k) {
 static void ocl_kernel_info(ocl_context_t* c, ocl_kernel_t kernel,
         ocl_kernel_info_t* info) {
     cl_kernel k = (cl_kernel)kernel;
-    cl_device_id device_id = (cl_device_id)ocl.devices[c->device_index].id;
+    cl_device_id device_id = (cl_device_id)ocl.devices[c->ix].id;
     #pragma push_macro("get_val")
     #define get_val(n, v) do { \
         call(clGetKernelWorkGroupInfo(k, device_id, n, sizeof(v), &v, null)); \
@@ -191,8 +200,9 @@ static void ocl_kernel_info(ocl_context_t* c, ocl_kernel_t kernel,
 }
 
 static void ocl_close(ocl_context_t* c) {
-    call(clReleaseContext((cl_context)c->ctx));
-    c->ctx = null;
+    ocl_dispose_queue(c);
+    call(clReleaseContext((cl_context)c->c));
+    c->c = null;
 }
 
 static const char* ocl_error(int r) {
@@ -286,7 +296,7 @@ static void ocl_init(void) {
 	    if (clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 1,
                 device_ids, &devids_count) == 0) {
             for (cl_uint j = 0; j < devids_count; j++) {
-                ocl_device_t* d = &ocl.devices[ocl.device_count];
+                ocl_device_t* d = &ocl.devices[ocl.count];
                 cl_device_id id = device_ids[j];
                 d->id = (ocl_device_id_t)id;
                 d->platform = platforms[i];
@@ -318,7 +328,7 @@ static void ocl_init(void) {
 //              char dll_pathname[260];
 //              get_str(CL_PLATFORM_ICD_SUFFIX_KHR, dll_pathname);
 
-                ocl.device_count++;
+                ocl.count++;
             }
         }
     }
@@ -345,8 +355,8 @@ static const char* ocl_fp_config_to_string(int64_t config) {
     return s;
 }
 
-static void ocl_dump(int device_index) {
-    const ocl_device_t* d = &ocl.devices[device_index];
+static void ocl_dump(int ix) {
+    const ocl_device_t* d = &ocl.devices[ix];
     traceln("Device name:     %s OpenCL %d.%d C %d.%d", d->name,
         d->version_major, d->version_minor, d->c_version_major, d->c_version_minor);
     traceln("compute_units:    %lld @ %lldMHz", d->compute_units, d->clock_frequency);
@@ -366,7 +376,6 @@ ocl_if ocl = {
     .dump = ocl_dump,
     .open = ocl_open,
     .error = ocl_error,
-    .create_queue = ocl_create_queue,
     .allocate = ocl_allocate,
     .deallocate = ocl_deallocate,
     .map = ocl_map,
@@ -382,7 +391,6 @@ ocl_if ocl = {
     .dispose_program = ocl_dispose_program,
     .flush = ocl_flush,
     .finish = ocl_finish,
-    .dispose_queue = ocl_dispose_queue,
     .close = ocl_close,
     .devices = ocl_devices
 };

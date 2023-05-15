@@ -7,7 +7,6 @@ extern "C" {
 #endif
 
 typedef struct ocl_device_id_s* ocl_device_id_t;
-typedef struct ocl_queue_s*     ocl_queue_t;
 typedef struct ocl_memory_s*    ocl_memory_t;
 typedef struct ocl_program_s*   ocl_program_t;
 typedef struct ocl_kernel_s*    ocl_kernel_t;
@@ -72,8 +71,10 @@ typedef struct ocl_kernel_info_s { // CL_KERNEL_*
 // usage of "size" "max" is confusing in OpenCL docs this avoided here
 
 typedef struct ocl_context_s {
-    int32_t device_index;
-    void*   ctx; // OpenCL context
+    int32_t ix; // device index
+    void*   c; // OpenCL context
+    void*   q; // OpenCL command queue
+    bool    profile; // cannot change on the fly
 } ocl_context_t;
 
 typedef struct ocl_arg_s {
@@ -86,45 +87,54 @@ typedef struct ocl_profiling_s { // in nanoseconds
     uint64_t submit;
     uint64_t start;
     uint64_t end;
+    double  user; // seconds: host time (to be filled by client)
     double  time; // seconds: end - start
     double  gops; // Giga items per second
+    uint64_t ema_samples; // 0 defaults to 128 samples
+    struct { // exponential moving average
+        double  user; // seconds: host time (to be calculated by client)
+        double  time; // seconds: end - start
+        double  gops; // Giga items per second
+    } ema;
 } ocl_profiling_t;
 
-enum { // .allocate() flags (matching OpenCL)
+enum { // .allocate() access flags (matching OpenCL)
     ocl_allocate_read  = (1 << 2),
     ocl_allocate_write = (1 << 1),
     ocl_allocate_rw    = (1 << 0)
 };
 
-enum { // .map() flags (matching OpenCL)
+enum { // .map() access flags (matching OpenCL)
     ocl_map_read  = (1 << 0),
     ocl_map_write = (1 << 2), // invalidates region
     ocl_map_rw    = ((1 << 0) | (1 << 1)),
 };
 
+// single device single queue OpenCL interface
+
 typedef struct ocl_if {
-    void (*init)(void);
-    void (*dump)(int device_index); // dumps device info
-    void (*open)(ocl_context_t* c, int32_t device_index);
-    // profiling: true waits(!!) for kernel to finish and returns profiling info
-    ocl_queue_t (*create_queue)(ocl_context_t* c, bool profiling);
+    void (*init)(void); // initializes devices[count] array
+    void (*dump)(int ix); // dumps device info
+    void (*open)(ocl_context_t* c, int32_t ix, bool profiling);
     // pinned memory with CL_MEM_ALLOC_HOST_PTR
-    ocl_memory_t (*allocate)(ocl_context_t* c, int flags, size_t bytes);
-    void (*flush)(ocl_queue_t command_queue); // all queued command to GPU
-    void (*finish)(ocl_queue_t command_queue); // waits for all commands to finish
+    ocl_memory_t (*allocate)(ocl_context_t* c, int access, size_t bytes);
+    void (*flush)(ocl_context_t* c); // all queued command to GPU
+    void (*finish)(ocl_context_t* c); // waits for all commands to finish
     void (*deallocate)(ocl_memory_t m);
     // ocl_map_read  - host will read data written by GPU
     // ocl_map_write - host will write data that GPU will read
-    void* (*map)(ocl_queue_t q, int flags, ocl_memory_t m,
+    void* (*map)(ocl_context_t* c, int flags, ocl_memory_t m,
         size_t offset, size_t bytes);
     // memory must be unmapped before the kernel is executed
-    void (*unmap)(ocl_queue_t q, ocl_memory_t m, const void* address);
-    ocl_program_t (*compile_program)(ocl_context_t* c, const char* code, size_t bytes);
+    void (*unmap)(ocl_context_t* c, ocl_memory_t m, const void* address);
+    ocl_program_t (*compile_program)(ocl_context_t* c, const char* code,
+        size_t bytes);
     ocl_kernel_t (*create_kernel)(ocl_program_t p, const char* name);
-    void (*kernel_info)(ocl_context_t* c, ocl_kernel_t kernel, ocl_kernel_info_t* info);
+    void (*kernel_info)(ocl_context_t* c, ocl_kernel_t kernel,
+        ocl_kernel_info_t* info);
     // 1-dimensional range kernel: if items_in_work_group is 0 max is used
-    ocl_event_t (*enqueue_range_kernel)(ocl_context_t* c, ocl_queue_t q,
-        ocl_kernel_t k, size_t groups, size_t items,
+    ocl_event_t (*enqueue_range_kernel)(ocl_context_t* c, ocl_kernel_t k,
+        size_t groups, size_t items,
         int argc, ocl_arg_t argv[]);
     void (*wait)(ocl_event_t* events, int count);
     // must wait() first before calling profile()
@@ -133,11 +143,9 @@ typedef struct ocl_if {
     const char* (*error)(int result);
     void  (*dispose_program)(ocl_program_t p);
     void  (*dispose_kernel)(ocl_kernel_t k);
-    // dispose_queue() call after all deallocte()
-    void  (*dispose_queue)(ocl_queue_t command_queue);
     void (*close)(ocl_context_t* c);
     ocl_device_t* devices;
-    int32_t device_count;
+    int32_t count;
 } ocl_if;
 
 extern ocl_if ocl;
