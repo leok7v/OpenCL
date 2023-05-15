@@ -164,7 +164,11 @@
     <ClInclude Include="..\rt.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\dot.cl" />
     <None Include="..\dot_product.cl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\dot.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

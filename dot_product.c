@@ -1,8 +1,8 @@
-#define PROGRAM_FILE "dot_product.cl"
+#define PROGRAM_FILE "../dot_product.cl"
 #define DOT_FUNC "dot_product"
 
 // 2^18
-#define VEC_SIZE 262144
+#define VEC_SIZE 256*256
 
 #include <math.h>
 #include <stdio.h>
@@ -93,7 +93,10 @@ cl_program build_program(cl_context ctx, cl_device_id dev, const char* filename)
    return program;
 }
 
-int main() {
+int32_t _main_(int32_t argc, const char* argv[]);
+
+int main(int32_t argc, const char* argv[]) {
+    if (1) { return _main_(argc, argv); }
    /* Host/device data structures */
    cl_device_id device;
    cl_context context;

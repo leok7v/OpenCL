@@ -6,13 +6,13 @@
 
 enum { KB = 1024, MB = 1024 * KB, GB = 1024 * MB };
 
-enum { N = 1024 * 1024 };
+enum { N = 256 * 256 }; // Intel GPU limitation
 
-static cl_int x_add_y(ocl_context_t* c, ocl_command_queue_t q, ocl_kernel_t k,
+static cl_int x_add_y(ocl_context_t* c, ocl_queue_t q, ocl_kernel_t k,
                       ocl_memory_t mx, ocl_memory_t my, ocl_memory_t mz) {
     {   // initialize pinned memory:
-        float* x = ocl.map_write(q, mx, 0, N * sizeof(float));
-        float* y = ocl.map_write(q, my, 0, N * sizeof(float));
+        float* x = ocl.map(q, ocl_map_write, mx, 0, N * sizeof(float));
+        float* y = ocl.map(q, ocl_map_write, my, 0, N * sizeof(float));
         // two input vectors
         for (int32_t i = 0; i < N; i++) { x[i] = (float)i; y[i] = (float)(N - i); }
         ocl.unmap(q, mx, x);
@@ -23,14 +23,21 @@ static cl_int x_add_y(ocl_context_t* c, ocl_command_queue_t q, ocl_kernel_t k,
          {&my, sizeof(ocl_memory_t)},
          {&mz, sizeof(ocl_memory_t)}
     };
-    ocl_event_t completion = ocl.enqueue_range_kernel(c, q, k, N, 0,
+    int64_t max_groups = ocl.devices[c->device_index].max_groups;
+    int64_t max_items  = ocl.devices[c->device_index].max_items[0];
+    int64_t groups = (N + max_items - 1) / max_items;
+    int64_t items  = (N + groups - 1) / groups;
+    assert(groups * items == N);
+    ocl_event_t completion = ocl.enqueue_range_kernel(c, q, k, groups, items,
         countof(args), args);
+    ocl.flush(q);
+    ocl.finish(q);
     ocl.wait(&completion, 1);
     ocl_profiling_t p = {0};
     ocl.profile(completion, &p, N);
     ocl.dispose_event(completion);
     {   // map result and verify it:
-        float* z = (float*)ocl.map_read(q, mz, 0, N * sizeof(float));
+        float* z = (float*)ocl.map(q, ocl_map_read, mz, 0, N * sizeof(float));
         for (int32_t i = 0; i < N; i++) {
             float xi = (float)i;
             float yi = (float)(N - i);
@@ -47,7 +54,7 @@ static cl_int x_add_y(ocl_context_t* c, ocl_command_queue_t q, ocl_kernel_t k,
 
 static cl_int test(ocl_context_t* c) {
     cl_int result = 0;
-    ocl_command_queue_t q = ocl.create_command_queue(c, true);
+    ocl_queue_t q = ocl.create_queue(c, true);
     static const char* code =
     "__kernel void " kernel_name "(__global const float* x, "
     "                              __global const float* y, "
@@ -57,20 +64,18 @@ static cl_int test(ocl_context_t* c) {
     "}\n";
     ocl_program_t p = ocl.compile_program(c, code, strlen(code));
     ocl_kernel_t k = ocl.create_kernel(p, kernel_name);
-    ocl_memory_t mx = ocl.allocate_write(c, N * sizeof(float));
-    ocl_memory_t my = ocl.allocate_write(c, N * sizeof(float));
-    ocl_memory_t mz = ocl.allocate_read(c, N * sizeof(float));
+    ocl_memory_t mx = ocl.allocate(c, ocl_allocate_write, N * sizeof(float));
+    ocl_memory_t my = ocl.allocate(c, ocl_allocate_write, N * sizeof(float));
+    ocl_memory_t mz = ocl.allocate(c, ocl_allocate_read, N * sizeof(float));
     x_add_y(c, q, k, mx, my, mz);
     x_add_y(c, q, k, mx, my, mz);
     x_add_y(c, q, k, mx, my, mz);
-    ocl.flush_command_queue(q);   // must be called before deallocate()
-    ocl.finish_command_queue(q);  // must be called before deallocate()
     ocl.deallocate(mx); // must be dealloca() before dispose_command_queue()
     ocl.deallocate(my);
     ocl.deallocate(mz);
     ocl.dispose_kernel(k);
     ocl.dispose_program(p);
-    ocl.dispose_command_queue(q);
+    ocl.dispose_queue(q);
     return result;
 }
 

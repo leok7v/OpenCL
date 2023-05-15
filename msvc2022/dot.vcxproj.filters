@@ -40,5 +40,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\dot_product.cl" />
+    <None Include="..\dot.cl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\dot.rc" />
   </ItemGroup>
 </Project>

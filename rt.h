@@ -56,16 +56,20 @@ double   seconds();     // seconds since boot (3/10MHz resolution)
 int64_t  nanoseconds(); // nanoseconds since boot (3/10MHz resolution)
 void     traceline(const char* file, int line, const char* func,
                    const char* format, ...);
+int      memmap_resource(const char* label, void* *data, int64_t *bytes);
 
 
-#define fatal_if(b, ...) do {                  \
-    bool _b_ = (b);                       \
-    if (_b_) {                            \
-        traceline(__FILE__, __LINE__, __func__, "" __VA_ARGS__); \
+#define fatal_if(b, ...) do {                                    \
+    bool _b_ = (b);                                              \
+    if (_b_) {                                                   \
         traceline(__FILE__, __LINE__, __func__, "%s", #b);       \
-        fprintf(stderr, "%s failed", #b); \
-        exit(1);                          \
-    }                                     \
+        traceline(__FILE__, __LINE__, __func__, "" __VA_ARGS__); \
+        fprintf(stderr, "%s(%d) %s() %s failed",                 \
+                __FILE__, __LINE__, __func__, #b);               \
+        fprintf(stderr, "" __VA_ARGS__);                         \
+        __debugbreak();                                          \
+        exit(1);                                                 \
+    }                                                            \
 } while (0)
 
 #ifdef RT_IMPLEMENTATION
@@ -90,9 +94,13 @@ typedef union LARGE_INTEGER {
 
 #pragma comment(lib, "kernel32")
 
-int32_t __stdcall QueryPerformanceCounter(LARGE_INTEGER* lpPerformanceCount);
-int32_t __stdcall QueryPerformanceFrequency(LARGE_INTEGER* lpFrequency);
-void    __stdcall OutputDebugStringA(const char* s);
+int32_t  __stdcall QueryPerformanceCounter(LARGE_INTEGER* lpPerformanceCount);
+int32_t  __stdcall QueryPerformanceFrequency(LARGE_INTEGER* lpFrequency);
+void     __stdcall OutputDebugStringA(const char* s);
+void*    __stdcall FindResourceA(void* module, const char* name, const char* type);
+uint32_t __stdcall SizeofResource(void* module, void* res);
+void*    __stdcall LoadResource(void* module, void* res);
+void*    __stdcall LockResource(void* res);
 
 #define std_input_handle    ((uint32_t)-10)
 #define std_output_handle   ((uint32_t)-11)
@@ -122,7 +130,8 @@ void traceline(const char* file, int line, const char* func,
     char text[1024];
     va_list vl;
     va_start(vl, format);
-    char* p = text + snprintf(text, countof(text), "%s(%d): %s ", file, line, func);
+    char* p = text + snprintf(text, countof(text), "%s(%d): %s() ",
+        file, line, func);
     vsnprintf(p, countof(text) - (p - text), format, vl);
     text[countof(text) - 1] = 0;
     text[countof(text) - 2] = 0;
@@ -131,6 +140,15 @@ void traceline(const char* file, int line, const char* func,
     va_end(vl);
     OutputDebugStringA(text);
     fprintf(stderr, "%s", text);
+}
+
+int memmap_resource(const char* label, void* *data, int64_t *bytes) {
+    enum { RT_RCDATA = 10 };
+    void* res = FindResourceA(null, label, (const char*)RT_RCDATA);
+    if (res != null) { *bytes = SizeofResource(null, res); }
+    void* g = res != null ? LoadResource(null, res) : null;
+    *data = g != null ? LockResource(g) : null;
+    return *data != null ? 0 : 1;
 }
 
 #endif // RT_IMPLEMENTATION

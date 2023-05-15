@@ -12,7 +12,7 @@ https://github.com/mattscar/opencl_dot_product
 
 ## interesting kernels
 
-https://github.com/LibreScanner/opencv/blob/master/modules/ocl/src/opencl/kmeans_kernel.cl
+https://github.com/pocl/pocl/blob/master/lib/kernel/dot.cl
 
 ### original code was at
 https://github.com/pratikone/OpenCL-learning-VS2012
