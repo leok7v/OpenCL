@@ -24,6 +24,8 @@ typedef struct gpu_s {
     void* queue;
     bool  profile;
     ocl_kernel_t kernel_dot_fp32;
+    ocl_kernel_t kernel_sum_odd_fp32;
+    ocl_kernel_t kernel_sum_even_fp32;
 } gpu_t;
 
 typedef struct gpu_memory_s { // treat as read only, will change don't cache
@@ -84,14 +86,13 @@ static void gpu_deallocate(gpu_memory_t* gm) {
 
 static fp32_t dot_f32(gpu_t* gpu, ocl_memory_t mx, ocl_memory_t my,
         int64_t n, int64_t stride0, int64_t stride1) {
+    assertion(n > 1, "to trivial for GPU");
     ocl_context_t* c = (ocl_context_t*)gpu->context;
     ocl_queue_t q = (ocl_queue_t)gpu->queue;
     fp32_t sum = 0;
     int64_t max_groups = ocl.devices[c->device_index].max_groups;
     int64_t max_items  = ocl.devices[c->device_index].max_items[0];
     #ifdef DEBUG // TODO: remove me after obtaining confidence in arithmetics
-//  max_groups = 2;
-//  max_items = 32;
     #endif
     int64_t offset = 0;
     while (n > 0) {
@@ -101,32 +102,66 @@ static fp32_t dot_f32(gpu_t* gpu, ocl_memory_t mx, ocl_memory_t my,
         if (groups > 1 && total > n) { groups--; total -= max_items; }
         int64_t items = total / groups;
         assertion(items > 0 && groups > 0 && items * groups <= n);
-        ocl_memory_t mz = ocl.allocate(c, ocl_allocate_read, groups * sizeof(fp32_t));
-        ocl_arg_t args[] =
+        assertion(total == groups * items);
+        ocl_memory_t mz = ocl.allocate(c, ocl_allocate_read, n * sizeof(fp32_t));
+        ocl_memory_t ms = ocl.allocate(c, ocl_allocate_read, groups * items / 2 * sizeof(fp32_t));
+        ocl_arg_t dot_args[] =
             {{&mx,      sizeof(ocl_memory_t)},
             {&my,      sizeof(ocl_memory_t)},
             {&mz,      sizeof(ocl_memory_t)},
-            {null,     items * sizeof(fp32_t)},
             {&offset,  sizeof(int32_t)},
             {&stride0, sizeof(int32_t)},
             {&stride1, sizeof(int32_t)}
         };
 //      traceln("    n: %lld (groups: %lld * items: %lld) %lld total: %lld", n, groups, items, groups * items, total);
-        ocl_event_t completion = ocl.enqueue_range_kernel(c, q, gpu->kernel_dot_fp32,
-                        groups, items, countof(args), args);
-//      ocl.flush(q);
-//      ocl.finish(q);
-        ocl.wait(&completion, 1);
+        ocl_event_t dot_completion = ocl.enqueue_range_kernel(c, q, gpu->kernel_dot_fp32,
+                        groups, items, countof(dot_args), dot_args);
+        int64_t m = groups * items;
+        int64_t k = m / 2;
+        ocl_memory_t ma = mz;
+        ocl_memory_t mb = ms;
+        while (k >= 1) {
+            fp32_t* a = (fp32_t*)ocl.map(q, ocl_map_read, ma, 0, m * sizeof(fp32_t));
+            fp32_t* b = (fp32_t*)ocl.map(q, ocl_map_read, mb, 0, k * sizeof(fp32_t));
+//          traceln("");
+            ocl.unmap(q, mb, b);
+            ocl.unmap(q, ma, a);
+            ocl_arg_t sum_args[] =
+               {{&ma, sizeof(ocl_memory_t)},
+                {&mb, sizeof(ocl_memory_t)}
+            };
+            ocl_kernel_t kernel = m % 2 == 0 ? gpu->kernel_sum_even_fp32 :
+                                               gpu->kernel_sum_odd_fp32;
+            if (groups > 1) {
+                groups >>= 1;
+            } else if (items  > 0) {
+                items  >>= 1;
+            }
+            assertion(groups * items == k);
+            ocl_event_t sum_completion = ocl.enqueue_range_kernel(c, q, kernel,
+                            groups, items, countof(sum_args), sum_args);
+            // todo cumulative performance
+            ocl.dispose_event(sum_completion);
+            ocl_memory_t swap = ma; ma = mb; mb = swap;
+            m = k;
+            k /= 2;
+        }
+        ocl.finish(q); // same as waiting for chain of events
+        fp32_t* a = (fp32_t*)ocl.map(q, ocl_map_read, ma, 0, n / 2 * sizeof(fp32_t));
+        sum += a[0];
+        ocl.unmap(q, ma, a);
         if (gpu->profile) {
             ocl_profiling_t p = {0};
-            ocl.profile(completion, &p, n);
-            traceln("kernel [%lldx%lld] execution on device: %.3f us (microseconds) Gops=%.3f",
+            ocl.profile(dot_completion, &p, n);
+            traceln("kernel dot[%lldx%lld]: %.3f us (microseconds) Gops=%.3f",
+                    groups, items, p.time * (1000 * 1000), p.gops);
+            ocl.profile(dot_completion, &p, n);
+            traceln("kernel sum[%lldx%lld]: %.3f us (microseconds) Gops=%.3f",
                     groups, items, p.time * (1000 * 1000), p.gops);
         }
-        ocl.dispose_event(completion);
-        fp32_t* z = (fp32_t*)ocl.map(q, ocl_map_read, mz, 0, groups * sizeof(fp32_t));
-        for (int64_t i = 0; i < groups; i++) { sum += z[i]; }
-        ocl.unmap(q, mz, z);
+        ocl.dispose_event(dot_completion);
+        ocl.deallocate(mz);
+        ocl.deallocate(ms);
         n -= total;
         offset += total;
     }
@@ -135,18 +170,23 @@ static fp32_t dot_f32(gpu_t* gpu, ocl_memory_t mx, ocl_memory_t my,
 
 static fp32_t gpu_dot_f32(gpu_memory_t* x, gpu_memory_t* y,
         int64_t n, int64_t stride0, int64_t stride1) {
-    fatal_if(x == y || x->handle == y->handle); // cannot be the same
-    fatal_if(x->gpu != y->gpu);
-    ocl_queue_t  q = (ocl_queue_t)x->gpu->queue;
-    ocl_memory_t mx = (ocl_memory_t)x->handle;
-    ocl_memory_t my = (ocl_memory_t)y->handle;
-    // memory must be unmapped before kernel execution
-    ocl.unmap(q, mx, x->m);
-    ocl.unmap(q, my, y->m);
-    fp32_t sum = dot_f32(x->gpu, mx, my, n, stride0, stride1);
-    // map back
-    x->m = ocl.map(q, x->map, mx, /*offset:*/ 0, x->bytes);
-    y->m = ocl.map(q, x->map, my, /*offset:*/ 0, y->bytes);
+    fp32_t sum = 0;
+    if (n > 1) {
+        fatal_if(x == y || x->handle == y->handle); // cannot be the same
+        fatal_if(x->gpu != y->gpu);
+        ocl_queue_t  q = (ocl_queue_t)x->gpu->queue;
+        ocl_memory_t mx = (ocl_memory_t)x->handle;
+        ocl_memory_t my = (ocl_memory_t)y->handle;
+        // memory must be unmapped before kernel execution
+        ocl.unmap(q, mx, x->m);
+        ocl.unmap(q, my, y->m);
+        sum = dot_f32(x->gpu, mx, my, n, stride0, stride1);
+        // map back
+        x->m = ocl.map(q, x->map, mx, /*offset:*/ 0, x->bytes);
+        y->m = ocl.map(q, x->map, my, /*offset:*/ 0, y->bytes);
+    } else {
+        sum = *(fp32_t*)x->m * *(fp32_t*)y->m;
+    }
     return sum;
 }
 
@@ -156,39 +196,41 @@ gpu_if gpu = {
     .dot_f32 = gpu_dot_f32,
 };
 
-static ocl_kernel_t compile(ocl_context_t* c, const void* kernel, int bytes) {
+static ocl_program_t compile(ocl_context_t* c, const void* code, int bytes) {
     int n = bytes + 1024;
     char* text = alloca(n);
     snprintf(text, n, "\n"
         "#define fp_t float\n"
         "#define name %s_float\n"
-        "%*.*s", kernel_name, bytes, bytes, (const char*)kernel);
+        "%*.*s", kernel_name, bytes, bytes, (const char*)code);
 //  traceln("%s", text);
-    ocl_program_t p = ocl.compile_program(c, text, strlen(text));
-    ocl_kernel_t k = ocl.create_kernel(p, kernel_name "_float");
-    ocl.dispose_program(p);
-    return k;
+    return ocl.compile_program(c, text, strlen(text));
 }
 
-static cl_int test(ocl_context_t* c, const void* kernel, int bytes) {
+static cl_int test(ocl_context_t* c, const void* code, int bytes) {
     cl_int result = 0;
     gpu_t dev = { 0 };
-    dev.profile = true;
+    dev.profile = false;
     ocl_queue_t q = ocl.create_queue(c, dev.profile);
-    ocl_kernel_t k = compile(c, kernel, bytes);
+    ocl_program_t p = compile(c, code, bytes);
+    dev.kernel_dot_fp32 = ocl.create_kernel(p, kernel_name "_float");
+    dev.kernel_sum_odd_fp32  = ocl.create_kernel(p, "sum_odd_fp32");
+    dev.kernel_sum_even_fp32 = ocl.create_kernel(p, "sum_even_fp32");
+    ocl.dispose_program(p);
     dev.context = c;
     dev.queue = q;
-    dev.kernel_dot_fp32 = k;
     double err = 0;
-    for (int n = 256 * 256; n < 256 * 256 + 1; n += 1023) {
+    for (int n = 2; n < 17; n++) {
         gpu_memory_t mx = gpu.allocate(&dev, gpu_allocate_write, n * sizeof(fp32_t));
         gpu_memory_t my = gpu.allocate(&dev, gpu_allocate_write, n * sizeof(fp32_t));
         fp32_t* x = (fp32_t*)mx.m;
         fp32_t* y = (fp32_t*)my.m;
         fp32_t sum = 0;
         for (int32_t i = 0; i < n; i++) {
-            x[i] = 1.0f + (i % 2 == 0 ? -1.0f : +1.f) / (i + 1);
-            y[i] = 1.0f - (i % 2 == 0 ? +1.0f : -1.f) / (i + 1);
+//          x[i] = 1.0f + (i % 2 == 0 ? -1.0f : +1.f) / (i + 1);
+//          y[i] = 1.0f - (i % 2 == 0 ? +1.0f : -1.f) / (i + 1);
+x[i] = (fp32_t)(i + 1);
+y[i] = (fp32_t)(i + 1);
 //          traceln("%f %f %f", x[i], y[i], x[i] * y[i]);
             sum += x[i] * y[i];
         }
@@ -196,15 +238,18 @@ static cl_int test(ocl_context_t* c, const void* kernel, int bytes) {
         gpu.deallocate(&mx);
         gpu.deallocate(&my);
         double rse = sqrt(pow(dot - sum, 2));
+        traceln("n: %d dot: %.7f  sum: %.7F rse: %.7f\n", n, dot, sum, rse);
         if (rse > err) {
-            traceln("n: %d dot: %.7f  sum: %.7F rse: %.7f\n", n, dot, sum, rse);
-            traceln("n: %d dot: %.7e  sum: %.7e rse: %.7e\n", n, dot, sum, rse);
+//          traceln("n: %d dot: %.7f  sum: %.7F rse: %.7f\n", n, dot, sum, rse);
+//          traceln("n: %d dot: %.7e  sum: %.7e rse: %.7e\n", n, dot, sum, rse);
             err = rse;
         }
 //      assertion(fabs(dot - sum) <= CL_DBL_EPSILON, "dot_product():%.7e != %.7e\n", dot, sum);
     }
     traceln("max rse: %.7e %.17f\n", err, err);
-    ocl.dispose_kernel(k);
+    ocl.dispose_kernel(dev.kernel_dot_fp32);
+    ocl.dispose_kernel(dev.kernel_sum_odd_fp32);
+    ocl.dispose_kernel(dev.kernel_sum_even_fp32);
     ocl.dispose_queue(q);
     return result;
 }
