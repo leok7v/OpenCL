@@ -40,11 +40,9 @@
       <Filter>CL</Filter>
     </ClCompile>
     <ClCompile Include="..\dot.c" />
-    <ClCompile Include="..\dot_product.c" />
     <ClCompile Include="..\gpu.c" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\dot_product.cl" />
     <None Include="..\dot.cl" />
   </ItemGroup>
   <ItemGroup>

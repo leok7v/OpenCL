@@ -154,7 +154,6 @@
   <ItemGroup>
     <ClCompile Include="..\CL\ocl.c" />
     <ClCompile Include="..\dot.c" />
-    <ClCompile Include="..\dot_product.c" />
     <ClCompile Include="..\gpu.c" />
     <ClCompile Include="..\rt.c" />
     <ClInclude Include="..\cl\cl.h" />
@@ -168,7 +167,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\dot.cl" />
-    <None Include="..\dot_product.cl" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\dot.rc" />
