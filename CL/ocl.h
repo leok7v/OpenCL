@@ -115,7 +115,7 @@ enum { // .map() access flags (matching OpenCL)
 typedef struct ocl_if {
     void (*init)(void); // initializes devices[count] array
     void (*dump)(int ix); // dumps device info
-    void (*open)(ocl_context_t* c, int32_t ix, bool profiling);
+    ocl_context_t (*open)(int32_t ix, bool profiling);
     // pinned memory with CL_MEM_ALLOC_HOST_PTR
     ocl_memory_t (*allocate)(ocl_context_t* c, int access, size_t bytes);
     void (*flush)(ocl_context_t* c); // all queued command to GPU

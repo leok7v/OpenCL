@@ -7,8 +7,9 @@
 - [x] OpenCL.dll exists on Windows and routes to both Intel and Nvidia drivers. But, possibly very old 1.2 version.
 - [x] Generated binding using GetProcAddress and trivial heared files parsing.
 - [x] Implemented 1-dimensional single command queue fail fast ocl.* interface.
-- [ ] Designe gpu.* interface to unify OpenCL and possbily Cuda and/or OpenMP?
-
+- [x] implement trivial host fp16_t support
+- [ ] Design gpu.* interface to unify OpenCL and possbily Cuda and/or OpenMP?
+- [ ] https://www.openmp.org/ ?
 
 ### original code was at
 https://github.com/pratikone/OpenCL-learning-VS2012

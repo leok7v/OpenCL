@@ -19,6 +19,10 @@
     <ClInclude Include="..\CL\ocl.h">
       <Filter>CL</Filter>
     </ClInclude>
+    <ClInclude Include="..\gpu.h" />
+    <ClInclude Include="..\fp16.h">
+      <Filter>rt</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="CL">
@@ -37,6 +41,7 @@
     </ClCompile>
     <ClCompile Include="..\dot.c" />
     <ClCompile Include="..\dot_product.c" />
+    <ClCompile Include="..\gpu.c" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\dot_product.cl" />

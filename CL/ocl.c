@@ -28,7 +28,8 @@ static void ocl_error_notify(const char * errinfo,
 
 static void* ocl_create_queue(ocl_context_t* c, bool profile);
 
-static void ocl_open(ocl_context_t* c, int32_t ix, bool profile) {
+static ocl_context_t ocl_open(int32_t ix, bool profile) {
+    ocl_context_t c;
     call(!(0 <= ix && ix < ocl.count));
     ocl_device_t* d = &ocl.devices[ix];
     cl_context_properties properties[] = {
@@ -36,13 +37,13 @@ static void ocl_open(ocl_context_t* c, int32_t ix, bool profile) {
     };
     cl_int r = 0;
     cl_device_id id = (cl_device_id)d->id;
-    cl_context ctx = clCreateContext(properties, 1, &id, ocl_error_notify,
-        /* user_data: */ null, &r);
-    not_null(ctx, r);
-    c->c = ctx;
-    c->ix = ix;
-    c->q = ocl_create_queue(c, profile);
-    c->profile = profile;
+    c.profile = profile;
+    c.ix = ix;
+    /* user_data: null will be passed to notify() */
+    c.c = clCreateContext(properties, 1, &id, ocl_error_notify, null, &r);
+    not_null(c.c, r);
+    c.q = ocl_create_queue(&c, c.profile);
+    return c;
 }
 
 static void* ocl_create_queue(ocl_context_t* c, bool profiling) {

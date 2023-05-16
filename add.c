@@ -83,8 +83,7 @@ int32_t main(int32_t argc, const char* argv[]) {
     ocl.init();
     for (int cycles = 2; cycles > 0; cycles--) {
         for (int i = 0; i < ocl.count; i++) {
-            ocl_context_t c = {0};
-            ocl.open(&c, i, true);
+            ocl_context_t c = ocl.open(i, true);
             printf("%s\n", ocl.devices[i].name);
             result = test(&c);
             printf("test: %s\n", result == 0 ? "OK" : "FAILED");
