@@ -9,7 +9,7 @@ typedef begin_packed struct _fp16_u_ {
 #undef fp16_t
 #define fp16_t _fp16_t_
 
-static_assertion(sizeof(fp16_t) == 2);
+static_assert(sizeof(fp16_t) == 2, "fp16_t size must be 2");
 
 #define fp16x(hex)       ((fp16_t){ .bytes = hex })
 
@@ -36,82 +36,131 @@ inline bool fp16_isnan(fp16_t v) { return ((v.bytes >> 10) & 0x1F) == 0x1F && (v
 
 inline bool fp16_isfinite(fp16_t v) { return ((v.bytes >> 10) & 0x1F) != 0x1F; }
 
-inline fp32_t fp16to32(fp16_t half) {
-    uint16_t v = half.bytes;
-    uint32_t sign = (v >> 15) & 0x00000001;
-    uint32_t exponent = (v >> 10) & 0x0000001f;
-    uint32_t mantissa = v & 0x000003ff;
+// Terminology:
+// "normal" actually "normalized" as in "shifted left till highest bit of
+// mantissa is not zero and than hide that bit and shift is expressed as
+// exponent".
+// "denormal" "subnormal" actually "not normalized" as in "nothing
+// is hidden in mantissa, it is not shifted and exponent is equal to zero.
+//
+// This allows floating number to have "subnormal" precision close to zero.
+// For float32 is actually extends close to zero density by 8 bit of exponent
+// and makes minimum strictly positive (subnormal) value pow(2, -31) for fp32_t
+// and pow(2, -24) fp16_t.
+//
+// The magic is based on exponent == 0 is actually pow(2, -exponent_range/2)
+// which allows for fp16_t representation of very small density of numbers
+// in the 0 to pow(2, -13) interval. The density is pow(2, -24) for 16 bit floats.
+// See:
+// https://en.wikipedia.org/wiki/Half-precision_floating-point_format
+
+inline fp16_t fp32to16(fp32_t f32) {
+	// Float structure:
+	// 1-bit sign
+	// 8-bit exponent
+	// 23-bit mantissa
+	// s eeeeeeee mmmmmmmmmmmmmmmmmmmmmmm
+	// Different float categories:
+	// 0 0000 0000 00000000000000000000000  +zero
+	// 1 0000 0000 00000000000000000000000  -zero
+	// s 0000 0000 mmmmmmmmmmmmmmmmmmmmmmm  A subnormal number, mmmmm != 0,
+    //                                      interpreted as (-1)^s * 2^-126 * 0.mmmmm
+	// s eeee eeee xxxxxxxxxxxxxxxxxxxxxxx  A normal number, eeeee != 0,
+    //                                      interpreted as (-1)^s * 2^(e-127) * 1.mmmmm
+	// 0 1111 1111 00000000000000000000000  +inf
+	// 1 1111 1111 00000000000000000000000  -inf
+	// y 1111 1111 1xxxxxxxxxxxxxxxxxxxxxx  Quiet NaN, y and xxxxx are arbitrary
+    //                                      (custom) payload for the NaN.
+	// y 1111 1111 0xxxxxxxxxxxxxxxxxxxxxx  Signalling NaN, y and xxxxx != 0 is
+    //                                      arbitrary payload for the NaN.
+
+	// When writing our custom low-precision minifloat, make sure that values
+    // in each of the above categories stays in
+	// the same category, if possible:
+	// subnormals:
+    //      conversion gracefully loses precision of mantissa.
+	// normals:
+    //      conversion with exponent out of range can cause overflow or underflow.
+	//      if the exponent is too large, result is +inf/-inf.
+	//      If the exponent is too small, the result will be zero.
+	// +/- inf, +/- zero: conversion does not affect the value.
+	// NaN and signaling NaN: conversion preseres signalling.
+	uint32_t v = *(uint32_t*)&f32;
+	uint32_t biased_exponent = (v & 0x7F800000) >> 23;
+	uint32_t mantissa = v & 0x7FFFFF;
+	uint32_t sign = (v & 0x80000000) >> 16;
     uint32_t result;
-    if (exponent == 0 && mantissa == 0) {  // zero
+	const uint32_t maxbiased_exponent = (1 << 5) - 1;
+	int true_exponent = biased_exponent - 127;
+	int new_biased_exponent;
+	// Compute the new biased exponent value to send.
+	if (biased_exponent != 0xFF && biased_exponent != 0) {
+		new_biased_exponent = true_exponent + 15;
+		if (new_biased_exponent >= (int)maxbiased_exponent) {
+			new_biased_exponent = maxbiased_exponent;
+			mantissa = 0; // inf, not NaN
+		} else if (new_biased_exponent < -10) {
+            // too small for subnormal
+            new_biased_exponent = 0;
+            mantissa = 0;
+        } else if (new_biased_exponent < 0) {
+            assert(0 <= 1 - new_biased_exponent);
+            mantissa |= 0x800000;  // add hidden bit
+            mantissa >>= (1 - new_biased_exponent);
+            new_biased_exponent = 0;
+        } else {
+        }
+        mantissa = (mantissa >> (23 - 10)) & 0x3FF;
+        result = sign | (new_biased_exponent << 10) | mantissa;
+	} else {
+        // either all zeroes (+/-zero or denormal) or all ones (nan or inf).
+		new_biased_exponent = biased_exponent & 0x1F;
+	    uint32_t new_mantissa = (mantissa >> (23 - 10)) & 0x3FF;
+    	// If the float was a signaling NaN, make sure it stays
+        // a signaling NaN:
+	    if (biased_exponent == 0x1F && mantissa != 0 && new_mantissa == 0) {
+	    	new_mantissa = 1; // denotes a NaN but not a signaling NaN
+        }
+        result = sign | (new_biased_exponent << 10) | new_mantissa;
+    }
+    assert(0 <= result && result <= UINT16_MAX);
+	return (fp16_t){ .bytes = (uint16_t)result };
+}
+
+inline fp32_t fp16to32(fp16_t fp16) {
+	uint32_t sign = (fp16.bytes & 0x8000) << 16;
+	uint32_t exponent = (fp16.bytes & 0x7C00) >> 10;
+	uint32_t mantissa = fp16.bytes & 0x03FF;
+    uint32_t result;
+    // Shift back the decoded mantissa to proper position.
+    if (exponent == 0 && mantissa == 0) {  // +/- zero
         result = sign << 31;
-    } else if (exponent == 0 && mantissa != 0) {  // denormalized
+    } else if (exponent == 0x1f && mantissa == 0) {  // +/- infinity
+        result = sign | (0xFF << 23);
+    } else if (exponent == 0x1f && mantissa != 0) {  // NaN
+        // preserve mantisa for signaling NaN (highest bit of mantissa)
+        result = sign | (0xFF << 23) | (mantissa << 13);
+	} else if (exponent != 0) { // normal exponent is not zero
+        exponent = exponent + (127 - 15);
+        mantissa = mantissa << 13;
+        result = sign | (exponent << 23) | mantissa;
+    } else if (mantissa != 0) { // not zero and not normalized
+        assert(exponent == 0);
         exponent = 127 - 15;
         while ((mantissa & 0x00000400) == 0) {  // left shift mantissa
             mantissa <<= 1;
             exponent -= 1;
         }
-        mantissa &= 0x000003ff;
-        result = (sign << 31) | (exponent << 23) | (mantissa << 13);
-    } else if (exponent == 0x1f && mantissa == 0) {  // infinity
-        result = (sign << 31) | (exponent << 23);
-    } else if (exponent == 0x1f && mantissa != 0) {  // NaN
-        result = (sign << 31) | (exponent << 23) | (mantissa << 13);
-    } else {  // normalized
-        exponent = exponent + (127 - 15);
-        mantissa = mantissa << 13;
-        result = (sign << 31) | (exponent << 23) | mantissa;
+        mantissa <<= 13;
+        exponent++;
+        mantissa &= 0x7FFFFF; // remove hidden bit
+        result = sign | (exponent << 23) | mantissa;
+        traceln("normalized result: 0x%08X", result);
+    } else {
+        assert(mantissa == 0 && exponent == 0, "+/- zero");
+        result = sign;
     }
-    fp32_t f;
-    memcpy(&f, &result, sizeof(fp32_t));
-    return f;
-}
-
-inline fp16_t fp32to16(fp32_t v) {
-    uint32_t bits = *(uint32_t*)&v;
-    uint32_t sign = bits >> 31;
-    uint32_t exponent = (bits >> 23) & 0xFF;
-    uint32_t mantissa = bits & 0x7FFFFF;
-    uint32_t result;
-    if (exponent == 0) {  // zero or subnormal
-        result = (sign << 15) | ((mantissa >> 13) & 0x7FFF);
-    } else if (exponent == 0xFF) {  // NaN or infinity
-        if (mantissa != 0) {  // NaN
-            result = (sign << 15) | 0x7C00;
-        } else {  // infinity
-            result = (sign << 15) | 0x7C00 | ((1 << 10) - 1);
-        }
-    } else {  // normalized
-        exponent = exponent + 15 - 127;
-        if (exponent >= 31) {  // overflow
-            result = (sign << 15) | 0x7C00;
-        } else if (exponent <= 0) {  // underflow
-            if (14 - exponent > 24) {  // round to zero
-                result = sign << 15;
-            } else {  // denormalized
-                if (exponent < -10) { // too small for subnormal
-                    mantissa = 0;
-                } else {
-                    mantissa |= 0x800000;  // add hidden bit
-                    mantissa >>= 1 - exponent;
-                }
-                result = (sign << 15) | ((mantissa >> 13) & 0x7FFF);
-            }
-        } else {
-            if (exponent > 15) { // too big to represent in fp16_t
-                result = (sign << 15) | 0x7C00;
-            } else {
-                mantissa |= 0x800000;  // add hidden bit
-                if (exponent == 15 && (mantissa & 0x3FF) != 0) {
-                    // round to even
-                    mantissa += (mantissa & 0x4000) >> 14;
-                }
-                result = (sign << 15) |
-                        ((exponent << 10) & 0x7C00) |
-                         (mantissa >> 13);
-            }
-        }
-    }
-    return (fp16_t){ .bytes = (uint16_t)result};
+	return *(fp32_t*)&result;
 }
 
 inline fp16_t fp16_add(fp16_t x, fp16_t y) {
@@ -140,29 +189,61 @@ inline bool fp16_gtr(fp16_t x, fp16_t y) { return fp16_compare(x, y) >  0; }
 inline bool fp16_gte(fp16_t x, fp16_t y) { return fp16_compare(x, y) >= 0; }
 inline bool fp16_neq(fp16_t x, fp16_t y) { return fp16_compare(x, y) != 0; }
 
-#include <float.h>
-
 #ifdef RT_IMPLEMENTATION
+
+#ifdef FP16_TESTS
 
 void fp16_test() {
 #if 0
     #define dump_f16(label, v) traceln("%-35s 0x%04X %.7E", label, v.bytes, fp16to32(v))
+    #define dump_f32(label, v) traceln("%-35s 0x%08X %.7E", label, *(uint32_t*)&v, v)
 #else
     #define dump_f16(label, v) (void)(v); // unused
+    #define dump_f32(label, v) (void)(v); // unused
 #endif
+    fp16_t one = fp32to16(1.0f);
+    assert(fp16_equ(one, fp16x(0x3C00)));
+    fp16_t two = fp32to16(2.0);
+    assert(fp16_equ(two, fp16_add(one, one)));
     fp16_t nan   = FP16_NAN;
     fp16_t inf_p = FP16_PINF;
     fp16_t inf_n = FP16_NINF;
-    assertion(fp16_isnan(nan));
-    assertion(!fp16_isfinite(inf_p));
-    assertion(!fp16_isfinite(inf_n));
-    assertion(fp16_isfinite(F16_MAX));
-    assertion(fp16_isfinite(F16_MIN));
-    assertion(fp16_isfinite(F16_EPSILON));
-    assertion(fp16_isfinite(F16_TRUE_MIN));
-    assertion(!fp16_isfinite(fp32to16(fp16to32(F16_MAX) + fp16to32(F16_MIN))));
-    fp16_t one = fp32to16(1.0f); // 0x3C00
-    assertion(fp16_equ(one, fp16x(0x3C00)));
+    assert(fp16_isnan(nan));
+    assert(!fp16_isfinite(inf_p));
+    assert(!fp16_isfinite(inf_n));
+    assert( fp16_isfinite(F16_MAX));
+    assert( fp16_isfinite(F16_MIN));
+    assert( fp16_isfinite(F16_EPSILON));
+    assert( fp16_isfinite(F16_TRUE_MIN));
+    {
+        fp16_t small = F16_MIN;
+        fp16_t a;
+        for (;;) {
+            a = fp16_add(small, F16_MAX);
+            if (!fp16_isfinite(a) || !fp16_equ(a, F16_MAX)) { break; }
+            small = fp16_add(small, small);
+        }
+        assert(!fp16_isfinite(a), "should not be able to add anything to MAX");
+        assert( fp16_equ(small, fp32to16(32)), "density between: 32768 65519 is 32");
+        dump_f16("a    :", a);
+        dump_f16("small:", small);
+    }
+    {   // verify epsilon
+        fp16_t f16_epsilon = one;
+        fp16_t last = one;
+        while (fp16_neq(one, fp16_add(one, f16_epsilon))) {
+            last = f16_epsilon;
+            f16_epsilon = fp16_div(f16_epsilon, fp32to16(2.0));
+        }
+        f16_epsilon = last;
+        assert(f16_epsilon.bytes == F16_EPSILON.bytes);
+    }
+    {
+        float f32e_add_1 = 1.0f + fp16to32(F16_EPSILON);
+        assert(f32e_add_1 != 1.0f);
+        fp16_t f16e_add_1 = fp32to16(f32e_add_1);
+        assert(f16e_add_1.bytes != one.bytes);
+    }
     fp16_t one_plus_epsilon = fp16_add(one, F16_EPSILON);
     assert(fp16_neq(one_plus_epsilon, one));
     fp16_t one_plus_min = fp16_add(one, F16_MIN);
@@ -175,6 +256,21 @@ void fp16_test() {
     fp16_t smallest_number_larger_than_one      = fp16x(0x3c01); // fp32to16(1.00097656f);
     fp16_t largest_normal_number                = fp16x(0x7BFF); // fp32to16(65504.0f);
     fp16_t largest_normal_number_negative       = fp16x(0xFBFF); // fp32to16(-65504.0f);
+
+    const float fp16_minimum_positive_subnormal_value_as_fp32 =
+        (float)pow(2,-24);
+    assert(fp16to32(fp32to16(fp16_minimum_positive_subnormal_value_as_fp32)) ==
+           fp16_minimum_positive_subnormal_value_as_fp32);
+    assert(fp16to32(fp32to16(fp16_minimum_positive_subnormal_value_as_fp32)) ==
+           fp16_minimum_positive_subnormal_value_as_fp32);
+    const float fp16_minimum_positive_normal_value_as_fp32 = (float)pow(2,-14);
+    assert(fp16to32(fp32to16(fp16_minimum_positive_normal_value_as_fp32)) ==
+           fp16_minimum_positive_normal_value_as_fp32);
+    // (2-2^-10) * 2^15 = 65504
+    const float f16_maximum_representable_value_as_fp32 =
+        (float)((2 - pow(2, -10)) * pow(2, 15));
+    assert(fp16to32(fp32to16(f16_maximum_representable_value_as_fp32)) ==
+           f16_maximum_representable_value_as_fp32);
     dump_f16("smallest_positive_subnormal_number", smallest_positive_subnormal_number);
     dump_f16("largest_subnormal_number          ", largest_subnormal_number);
     dump_f16("smallest_positive_normal_number   ", smallest_positive_normal_number);
@@ -184,7 +280,75 @@ void fp16_test() {
     dump_f16("largest_normal_number             ", largest_normal_number);
     dump_f16("largest_normal_number_negative    ", largest_normal_number_negative);
     dump_f16("F16_EPSILON                       ", F16_EPSILON);
-    dump_f16("one                               ", one);
+    dump_f16("F16_MAX                           ", F16_MAX);
+    dump_f16("F16_MIN                           ", F16_MIN);
+    dump_f16("F16_TRUE_MIN                      ", F16_TRUE_MIN);
+    static uint32_t seed;
+    static fp16_t a[10];
+    static fp16_t b[countof(a)];
+    fp16_t sum = fp32to16(0);
+    fp32_t sum32 = 0;
+    fp64_t sum64 = 0;
+    for (int i = 0; i < countof(a); i++) {
+        a[i] = fp32to16((float)i);
+        b[i] = fp32to16((float)(countof(a) - 1 - i));
+        sum32 += (float)i + (float)i;
+        sum64 += i + i;
+        traceln("[%d] a:%.6f b:%.6f", i, fp16to32(a[i]), fp16to32(b[i]));
+        sum = fp16_add(fp16_add(a[i], b[i]), sum);
+    }
+    traceln("sum fp16:%.6f fp32:%.6f fp64:%.6f", fp16to32(sum), sum32, sum64);
+
+    for (int i = 0; i < countof(a); i++) {
+        double ai = 2.0 * ((random32(&seed) / (double)UINT32_MAX) - 1.0);
+        a[i] = fp32to16((float)ai);
+        double bi = 2.0 * ((random32(&seed) / (double)UINT32_MAX) - 1.0);
+        b[i] = fp32to16((float)bi);
+        traceln("%.6f %.6f", fp16to32(a[i]), fp16to32(b[i]));
+        sum32 += (float)ai * (float)bi;
+        sum64 += ai * bi;
+    }
+    for (int i = 0; i < countof(a); i++) {
+        sum = fp16_add(fp16_mul(a[i], b[i]), sum);
+    }
+    traceln("sum fp16:%.6f fp32:%.6f fp64:%.6f", fp16to32(sum), sum32, sum64);
+    sum = fp32to16(0);
+    // all integers:
+    for (int i = 0; i < (2U << 10); i++) {
+        fp32_t f32i = (float)(i);
+        fp16_t f16i = fp32to16(f32i);
+        assert(fp16to32(f16i) == f32i);
+    }
+    // all exact fractions:
+    for (int i = 0; i < (1 << 10); i++) {
+        // "The stored exponents 0b00000 and 0b11111 are interpreted specially."
+        for (int exp = 1; exp < 0xF; exp++) {
+            // deminishing values toward zero both "normalized" and "not normalized"
+            fp32_t f32i = (float)(i) / (float)(1 << exp);
+            const float minimum_positive_subnormal_value = (float)pow(2,-24);
+            assert(f32i == 0 || fabs(f32i) >= minimum_positive_subnormal_value);
+            if (exp <= 10) { // normal (aka "normalized")
+                const float minimum_positive_normal_value = (float)pow(2,-14);
+                assert(f32i == 0 || fabs(f32i) >= minimum_positive_normal_value);
+            }
+            fp16_t f16i = fp32to16(f32i);
+            assert(fp16to32(f16i) == f32i, "fp16: %.7e fp32: %.7e", fp16to32(f16i), f32i);
+        }
+    }
+    for (int i = 0; i < (1 << 10); i++) {
+        // "The stored exponents 0b00000 and 0b11111 are interpreted specially."
+        for (int exp = 1; exp < 0xF; exp++) {
+            // toward maximum
+            fp32_t f32i = (float)(i) / (float)(1 << 10) * (1 << exp);
+            // (2-2^-10) * 2^15 = 65504
+            const float maximum_representable_value = (float)((2 - pow(2, -10)) * pow(2, 15));
+            assert(fabs(f32i) <= maximum_representable_value);
+            fp16_t f16i = fp32to16(f32i);
+            assert(fp16to32(f16i) == f32i);
+        }
+    }
 }
 
-#endif
+#endif // FP16_TESTS
+
+#endif // RT_IMPLEMENTATION
