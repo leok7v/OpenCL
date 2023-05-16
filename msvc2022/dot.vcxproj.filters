@@ -43,9 +43,9 @@
     <ClCompile Include="..\gpu.c" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\dot.cl" />
+    <ResourceCompile Include="..\dot.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="..\dot.rc" />
+    <None Include="..\gpu.cl" />
   </ItemGroup>
 </Project>

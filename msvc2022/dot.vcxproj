@@ -166,10 +166,10 @@
     <ClInclude Include="..\rt.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\dot.cl" />
+    <ResourceCompile Include="..\dot.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="..\dot.rc" />
+    <None Include="..\gpu.cl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

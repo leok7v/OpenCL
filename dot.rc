@@ -5,4 +5,4 @@
 #endif
 #endif
 
-dot_cl RCDATA "dot.cl"
+gpu_cl RCDATA "gpu.cl"

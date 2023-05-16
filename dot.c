@@ -7,6 +7,10 @@
 #include "ocl.h"
 #include "gpu.h"
 
+// Think about what is known in at compiler time for Parallel Reduction
+// (e.g. sum of vector elements).
+// https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
+
 static uint32_t seed = 1;
 
 static fp32_t dot_f32(gpu_t* g,
@@ -156,15 +160,12 @@ y[i] = (fp32_t)(i + 1);
     traceln("max rse: %.7e %.17f\n", err, err);
 }
 
-void fp16_test();
-
-int32_t _main_(int32_t argc, const char* argv[]) {
+int32_t main(int32_t argc, const char* argv[]) {
     (void)argc; (void)argv;
-    fp16_test();
     bool profile = true;
     void* code = null;
     int64_t bytes = 0;
-    int r = memmap_resource("dot_cl", &code, &bytes);
+    int r = memmap_resource("gpu_cl", &code, &bytes);
     fatal_if(r != 0 || code == null || bytes == 0, "dot_cl is not in dot.rc");
     ocl.init();
     for (int cycles = 1; cycles > 0; cycles--) {
