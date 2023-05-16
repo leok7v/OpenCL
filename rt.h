@@ -1,15 +1,55 @@
 #pragma once
+#include <assert.h>
+#include <float.h>
+#include <malloc.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <memory.h>
 
 // tiny Windows runtime for missing stuff
 
 #ifdef cplusplus
 extern "C" {
+#endif
+
+#ifndef countof
+    #define countof(a) (sizeof(a) / sizeof((a)[0])) // MS is _countof()
+#endif
+
+#define null ((void*)0) // like nullptr but for C99
+
+uint32_t random32(uint32_t* state); // state aka seed
+double   seconds();     // seconds since boot (3/10MHz resolution)
+int64_t  nanoseconds(); // nanoseconds since boot (3/10MHz resolution)
+void     traceline(const char* file, int line, const char* func,
+                   const char* format, ...);
+int      memmap_resource(const char* label, void* *data, int64_t *bytes);
+
+#if defined(__GNUC__) || defined(__clang__)
+#define attribute_packed __attribute__((packed))
+#define begin_packed
+#define end_packed attribute_packed
+#else
+#define begin_packed __pragma( pack(push, 1) )
+#define end_packed __pragma( pack(pop) )
+#define attribute_packed !!! use begin_packed/end_packed instead !!!
+#endif // usage: typedef begin_packed struct foo_s { ... } end_packed foo_t;
+
+#ifndef byte_t
+    #define byte_t uint8_t
+#endif
+
+#ifndef fp32_t
+    #define fp32_t float
+#endif
+
+#ifndef fp64_t
+    #define fp64_t double
 #endif
 
 #define thread_local __declspec(thread)
@@ -25,39 +65,18 @@ extern "C" {
     }                                                                       \
 } while (0) // better assert
 
+#undef  assert
+#define assert(...) assertion(__VA_ARGS__)
+
 #define static_assertion(b) static_assert(b, #b)
 
-#ifndef countof
-    #define countof(a) (sizeof(a) / sizeof((a)[0])) // MS is _countof()
-#endif
-
-#define null ((void*)0) // like nullptr but for C99
-
-#if defined(__GNUC__) || defined(__clang__)
-#define attribute_packed __attribute__((packed))
-#define begin_packed
-#define end_packed attribute_packed
-#else
-#define begin_packed __pragma( pack(push, 1) )
-#define end_packed __pragma( pack(pop) )
-#define attribute_packed !!! use begin_packed/end_packed instead !!!
-#endif
-
-// usage: typedef begin_packed struct foo_s { ... } end_packed foo_t;
+#include "fp16.h"
 
 enum {
     NSEC_IN_USEC = 1000,
     NSEC_IN_MSEC = NSEC_IN_USEC * 1000,
     NSEC_IN_SEC  = NSEC_IN_MSEC * 1000
 };
-
-uint32_t random32(uint32_t* state); // state aka seed
-double   seconds();     // seconds since boot (3/10MHz resolution)
-int64_t  nanoseconds(); // nanoseconds since boot (3/10MHz resolution)
-void     traceline(const char* file, int line, const char* func,
-                   const char* format, ...);
-int      memmap_resource(const char* label, void* *data, int64_t *bytes);
-
 
 #define fatal_if(b, ...) do {                                    \
     bool _b_ = (b);                                              \
@@ -127,7 +146,7 @@ int64_t nanoseconds() {
 
 void traceline(const char* file, int line, const char* func,
         const char* format, ...) {
-    char text[1024];
+    static thread_local char text[32 * 1024];
     va_list vl;
     va_start(vl, format);
     char* p = text + snprintf(text, countof(text), "%s(%d): %s() ",
