@@ -14,7 +14,7 @@
     <ProjectGuid>{42F1BE1F-678C-4733-A9F0-A7BFFFCF3DD2}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>dot</RootNamespace>
-    <ProjectName>dot</ProjectName>
+    <ProjectName>blast</ProjectName>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -152,11 +152,12 @@
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\blast.c" />
     <ClCompile Include="..\CL\ocl.c" />
-    <ClCompile Include="..\dot.c" />
     <ClCompile Include="..\gpu.c" />
     <ClCompile Include="..\rt.c" />
     <ClCompile Include="..\tests.c" />
+    <ClInclude Include="..\blast.h" />
     <ClInclude Include="..\cl\cl.h" />
     <ClInclude Include="..\cl\cl_platform.h" />
     <ClInclude Include="..\cl\cl_version.h" />
@@ -167,11 +168,11 @@
     <ClInclude Include="..\rt.h" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="..\dot.rc" />
+    <None Include="..\blast.cl" />
+    <None Include="..\CL\cl_bind.inc" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\CL\cl_bind.inc" />
-    <None Include="..\gpu.cl" />
+    <ResourceCompile Include="..\blast.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

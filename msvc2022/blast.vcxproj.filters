@@ -23,6 +23,7 @@
     <ClInclude Include="..\fp16.h">
       <Filter>rt</Filter>
     </ClInclude>
+    <ClInclude Include="..\blast.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="CL">
@@ -39,17 +40,17 @@
     <ClCompile Include="..\CL\ocl.c">
       <Filter>CL</Filter>
     </ClCompile>
-    <ClCompile Include="..\dot.c" />
     <ClCompile Include="..\gpu.c" />
     <ClCompile Include="..\tests.c" />
+    <ClCompile Include="..\blast.c" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="..\dot.rc" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="..\gpu.cl" />
     <None Include="..\CL\cl_bind.inc">
       <Filter>CL</Filter>
     </None>
+    <None Include="..\blast.cl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\blast.rc" />
   </ItemGroup>
 </Project>

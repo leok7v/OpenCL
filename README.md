@@ -12,4 +12,6 @@
 - [ ] implement sum(v) measure perfromance of submitting to queue and reading results on host side
 - [ ] test dot.c for a) 1..16 x 1..16 dot() b) huge dataset clustered around 1.0+/-delta c) measure all performances on add.c 
 - [ ] implement gemv()
+- [x] dot.c -> blast.c (Basic Linear Algebra Subrotines/Subprograms/Functions TINY)
+
 
