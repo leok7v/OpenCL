@@ -169,8 +169,7 @@ int32_t main(int32_t argc, const char* argv[]) {
     fatal_if(r != 0 || code == null || bytes == 0, "dot_cl is not in dot.rc");
     ocl.init();
     for (int cycles = 1; cycles > 0; cycles--) {
-//      for (int i = 0; i < ocl.count; i++) {
-        for (int i = 0; i < 1; i++) { // xxx TODO: only NVIDIA for now
+        for (int i = 0; i < ocl.count; i++) {
             gpu_t gp = { 0 };
             ocl_context_t c = ocl.open(i, profile);
             traceln("%s\n", ocl.devices[i].name);

@@ -12,6 +12,19 @@ typedef struct ocl_program_s*   ocl_program_t;
 typedef struct ocl_kernel_s*    ocl_kernel_t;
 typedef struct ocl_event_s*     ocl_event_t;
 
+enum { // flavor (bitset because of collaboration and mixed solutions)
+    ocl_nvidia    = (1 << 0),
+    ocl_amd       = (1 << 1),
+    ocl_intel     = (1 << 2),
+    ocl_apple     = (1 << 3),
+    ocl_adreno    = (1 << 4), // Qualcomm
+    ocl_videoCore = (1 << 5), // Broadcom
+    ocl_powerVR   = (1 << 6), // IBM
+    ocl_vivante   = (1 << 7), // Imagination
+    ocl_mali      = (1 << 8)  // ARM
+    // to be continued...
+};
+
 enum { // float_fp_config, doublefp_config bits
     ocl_fp_denorm                        = (1 << 0),
     ocl_fp_inf_nan                       = (1 << 1),
@@ -20,8 +33,14 @@ enum { // float_fp_config, doublefp_config bits
     ocl_fp_round_to_inf                  = (1 << 4),
     ocl_fp_fma                           = (1 << 5),
     ocl_fp_soft_float                    = (1 << 6),
-    ocl_fp_correctly_rounded_divide_sqrt = (1 << 7)
+    ocl_fp_correctly_rounded_divide_sqrt = (1 << 7),
 };
+
+enum { // fp_config
+    ocl_fp16                             = (1 << 29),
+    ocl_fp64                             = (1 << 30)
+};
+
 // __kernel can use
 // #pragma OPENCL SELECT_ROUNDING_MODE rte // rte rtz rtp rtn
 // and
@@ -44,8 +63,11 @@ typedef struct ocl_device_s {
     int64_t max_groups;       // max number of work groups, see: ** below
     int64_t dimensions;       // dimensionality of work items
     int64_t max_items[3];     // max work items in a group per dimension
+    int32_t flavor;           // GPU manufacturer - tricky, could be a mix
+    int32_t fp_config;
     int64_t double_fp_config;
     int64_t float_fp_config;
+    char    extensions[4096]; // use strstr(extensions, "cl_khr_fp16")
 } ocl_device_t;
 
 // ** confusion between OpenCL devices and CL_C versions:

@@ -289,12 +289,14 @@ static const char* ocl_error(int r) {
 static void ocl_init(void) {
     #pragma push_macro("get_str")
     #pragma push_macro("get_val")
+    #pragma push_macro("ext")
     #define get_str(name, s) do { \
         call(clGetDeviceInfo(id, name, countof(s), s, null)); \
     } while (0)
     #define get_val(name, v) do { \
         call(clGetDeviceInfo(id, name, sizeof(v), &v, null)); \
     } while (0)
+    #define ext(s) (strstr(d->extensions, (s)) != null)
     // Get platform and device information
     cl_platform_id platforms[16] = {0};
     cl_uint platform_count = countof(platforms);
@@ -311,17 +313,18 @@ static void ocl_init(void) {
                 d->platform = platforms[i];
                 get_str(CL_DEVICE_NAME, d->name);
                 get_str(CL_DEVICE_VENDOR, d->vendor);
-                char version[128];
-                get_str(CL_DEVICE_VERSION, version); // e.g. "OpenCL 3.0 CUDA"
+                char text[4096];
+                get_str(CL_DEVICE_VERSION, text); // e.g. "OpenCL 3.0 CUDA"
                 int minor = 0; // sscanf wants type "int" not "int32_t"
                 int major = 0;
-                call(sscanf(version, "OpenCL %d.%d", &major, &minor) != 2);
+                call(sscanf(text, "OpenCL %d.%d", &major, &minor) != 2);
                 d->version_major = major;
                 d->version_minor = minor;
-                get_str(CL_DEVICE_OPENCL_C_VERSION, version);
-                call(sscanf(version, "OpenCL C %d.%d", &major, &minor) != 2);
+                get_str(CL_DEVICE_OPENCL_C_VERSION, text);
+                call(sscanf(text, "OpenCL C %d.%d", &major, &minor) != 2);
                 d->c_version_major = major;
                 d->c_version_minor = minor;
+                get_str(CL_DEVICE_EXTENSIONS, d->extensions);
                 get_val(CL_DEVICE_MAX_CLOCK_FREQUENCY,      d->clock_frequency);
                 get_val(CL_DEVICE_GLOBAL_MEM_SIZE,          d->global_memory);
                 get_val(CL_DEVICE_LOCAL_MEM_SIZE,           d->local_memory);
@@ -332,19 +335,47 @@ static void ocl_init(void) {
                 get_val(CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, d->dimensions);
                 call(d->dimensions > countof(d->max_items));
                 get_val(CL_DEVICE_MAX_WORK_ITEM_SIZES, d->max_items);
-//              unfortunately this does NOT work:
-//              #define CL_PLATFORM_ICD_SUFFIX_KHR 0x0920
-//              char dll_pathname[260];
-//              get_str(CL_PLATFORM_ICD_SUFFIX_KHR, dll_pathname);
-
+                d->fp_config = 0;
+                d->fp_config |= ext("cl_khr_fp64") ? ocl_fp64 : 0;
+                d->fp_config |= ext("cl_khr_fp16") ? ocl_fp16 : 0;
+                d->flavor = 0;
+                d->flavor |= ext("_intel_") ? ocl_intel  : 0;
+                d->flavor |= ext("_nv_")    ? ocl_nvidia : 0;
+                d->flavor |= ext("_amd_")   ? ocl_amd    : 0;
+//              if (ext("cl_intel_accelerator")) { // see note: ***
+//                  d->fp_config &= ~ocl_fp64;
+//              }
+                d->fp_config |= ocl_fp16;
                 ocl.count++;
             }
         }
     }
+    #pragma pop_macro("ext")
     #pragma pop_macro("get_val")
     #pragma pop_macro("get_str")
 }
 
+// Intel(R) UHD Graphics does not support ocl_fp64
+// manifesting it by saying
+//    "use of type 'double' requires cl_khr_fp64 extension to be enabled"
+// while NOT having 'cl_khr_fp64' among it's extensions
+// but double_fp_config == 0
+//
+// Mass confusion in the cl_khr_fp* use and abuse of reporting and enablement:
+//
+// Since OpenCL C 1.1 it is NOT required to enable cl_khr_fp64 extension
+// to use "double" type in .cl code.
+// However some Intel CPU/Integrated Graphics GPU silicon
+// does not implement double.
+// OpenCL is not clear on reporting the device float/double
+// capabilities and clang .cl compiler struggles with it.
+// Real problem is the cl_khr_* are [ab]used for both reporting
+// and enablement/disablement which is muddy.
+// For now both cl_khr_fp64 and cl_intel_accelerator are checked
+// until OpenCL achive clarity on #pragma extension
+// enabling/disabling and reporting
+// https://github.com/KhronosGroup/OpenCL-Docs/issues/82
+// https://github.com/KhronosGroup/OpenCL-Docs/pull/355
 
 static const char* ocl_fp_config_to_string(int64_t config) {
     static char s[1024];
@@ -361,6 +392,7 @@ static const char* ocl_fp_config_to_string(int64_t config) {
     if (config & ocl_fp_correctly_rounded_divide_sqrt) {
         append("ocl_fp_correctly_rounded_divide_sqrt");
     }
+    #pragma pop_macro("append")
     return s;
 }
 
@@ -377,7 +409,7 @@ static void ocl_dump(int ix) {
     traceln("max_items[]:     {%lld %lld %lld}", wi[0], wi[1], wi[2]);
     traceln("float_fp_config:  %s", ocl_fp_config_to_string(d->float_fp_config));
     traceln("double_fp_config: %s", ocl_fp_config_to_string(d->double_fp_config));
-    #pragma pop_macro("append")
+    traceln("extensions:       %s", d->extensions);
 }
 
 ocl_if ocl = {

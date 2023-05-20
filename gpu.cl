@@ -32,14 +32,13 @@
 //#pragma OPENCL EXTENSION cl_khr_fp64: enable
 //#endif
 
+#ifdef cl_khr_fp64
+    #pragma OPENCL EXTENSION cl_khr_fp64: enable
+#elif defined(cl_amd_fp64)
+    #pragma OPENCL EXTENSION cl_amd_fp64 : enable
+#endif
+
 #pragma OPENCL EXTENSION cl_khr_fp16: enable
-
-typedef int  int32_t;
-typedef long int64_t;
-
-typedef half   fp16_t;
-typedef float  fp32_t;
-typedef double fp64_t;
 
 #define _concat_(first, last)  first ##_## last
 #define name(first, last)      _concat_(first, last)
