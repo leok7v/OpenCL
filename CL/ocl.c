@@ -90,12 +90,12 @@ static void  ocl_deallocate(ocl_memory_t m) {
     call(clReleaseMemObject((cl_mem)m));
 }
 
-static void* ocl_map(ocl_context_t* c, int access, ocl_memory_t m, size_t offset,
+static void* ocl_map(ocl_context_t* c, int mapping, ocl_memory_t m, size_t offset,
         size_t bytes) {
     cl_int r = 0;
     // blocking_map: true sync mapping
     void* a = clEnqueueMapBuffer((cl_command_queue)c->q, (cl_mem)m,
-        /*blocking_map: */ true, access, offset, bytes, 0, null, null, &r);
+        /*blocking_map: */ true, mapping, offset, bytes, 0, null, null, &r);
     not_null(a, r);
     return a;
 }

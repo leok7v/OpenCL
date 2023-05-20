@@ -11,15 +11,15 @@
 #endif
 
 enum { // .allocate() flags (for now matching ocl_allocate_*)
-    gpu_allocate_read  = (1 << 2),
-    gpu_allocate_write = (1 << 1),
-    gpu_allocate_rw    = (1 << 0)
+    gpu_allocate_read  = 0, // not a bitset!
+    gpu_allocate_write = 1,
+    gpu_allocate_rw    = 2
 };
 
 enum { // .map() access flags (for now matching ocl_map_*)
-    gpu_map_read  = (1 << 0),
-    gpu_map_write = (1 << 2), // invalidates region
-    gpu_map_rw    = ((1 << 0) | (1 << 1)),
+    gpu_map_read  = 0, // not a bitset!
+    gpu_map_write = 1, // invalidates region
+    gpu_map_rw    = 2,
 };
 
 enum { // kernel indices

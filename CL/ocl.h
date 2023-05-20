@@ -145,7 +145,7 @@ typedef struct ocl_if {
     void (*deallocate)(ocl_memory_t m);
     // ocl_map_read  - host will read data written by GPU
     // ocl_map_write - host will write data that GPU will read
-    void* (*map)(ocl_context_t* c, int flags, ocl_memory_t m,
+    void* (*map)(ocl_context_t* c, int mapping, ocl_memory_t m,
         size_t offset, size_t bytes);
     // memory must be unmapped before the kernel is executed
     void (*unmap)(ocl_context_t* c, ocl_memory_t m, const void* address);
