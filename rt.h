@@ -29,6 +29,8 @@ int64_t  nanoseconds(); // nanoseconds since boot (3/10MHz resolution)
 void     traceline(const char* file, int line, const char* func,
                    const char* format, ...);
 int      memmap_resource(const char* label, void* *data, int64_t *bytes);
+void*    load_dl(const char* pathname); // dlopen | LoadLibrary
+void*    find_symbol(void* dl, const char* symbol); // dlsym | GetProcAddress
 
 #if defined(__GNUC__) || defined(__clang__)
 #define attribute_packed __attribute__((packed))
@@ -83,7 +85,7 @@ enum {
     if (_b_) {                                                   \
         traceline(__FILE__, __LINE__, __func__, "%s", #b);       \
         traceline(__FILE__, __LINE__, __func__, "" __VA_ARGS__); \
-        fprintf(stderr, "%s(%d) %s() %s failed",                 \
+        fprintf(stderr, "%s(%d) %s() %s failed ",                \
                 __FILE__, __LINE__, __func__, #b);               \
         fprintf(stderr, "" __VA_ARGS__);                         \
         __debugbreak();                                          \
@@ -92,6 +94,9 @@ enum {
 } while (0)
 
 #ifdef RT_IMPLEMENTATION
+
+// or posix: long random(void);
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/random.html
 
 uint32_t random32(uint32_t* state) {
     // https://gist.github.com/tommyettinger/46a874533244883189143505d203312c
@@ -103,6 +108,12 @@ uint32_t random32(uint32_t* state) {
     return z ^ (z >> 14);
 }
 
+#pragma comment(lib, "kernel32")
+
+#define std_input_handle    ((uint32_t)-10)
+#define std_output_handle   ((uint32_t)-11)
+#define std_error_handle    ((uint32_t)-12)
+
 typedef union LARGE_INTEGER {
     struct {
         uint32_t LowPart;
@@ -111,8 +122,7 @@ typedef union LARGE_INTEGER {
     int64_t QuadPart;
 } LARGE_INTEGER;
 
-#pragma comment(lib, "kernel32")
-
+void*    __stdcall GetStdHandle(uint32_t stdhandle);
 int32_t  __stdcall QueryPerformanceCounter(LARGE_INTEGER* lpPerformanceCount);
 int32_t  __stdcall QueryPerformanceFrequency(LARGE_INTEGER* lpFrequency);
 void     __stdcall OutputDebugStringA(const char* s);
@@ -120,12 +130,8 @@ void*    __stdcall FindResourceA(void* module, const char* name, const char* typ
 uint32_t __stdcall SizeofResource(void* module, void* res);
 void*    __stdcall LoadResource(void* module, void* res);
 void*    __stdcall LockResource(void* res);
-
-#define std_input_handle    ((uint32_t)-10)
-#define std_output_handle   ((uint32_t)-11)
-#define std_error_handle    ((uint32_t)-12)
-
-void*   __stdcall GetStdHandle(uint32_t stdhandle);
+void*    __stdcall LoadLibraryA(const char* pathname);
+void*    __stdcall GetProcAddress(void* module, const char* pathname);
 
 
 double seconds() { // since_boot
@@ -143,6 +149,14 @@ double seconds() { // since_boot
 int64_t nanoseconds() {
     return (int64_t)(seconds() * NSEC_IN_SEC);
 }
+
+/* posix:
+uint64_t time_in_nanoseconds_absolute() {
+    struct timespec tm = {0};
+    clock_gettime(CLOCK_MONOTONIC, &tm);
+    return NSEC_IN_SEC * (int64_t)tm.tv_sec + tm.tv_nsec;
+}
+*/
 
 void traceline(const char* file, int line, const char* func,
         const char* format, ...) {
@@ -169,6 +183,19 @@ int memmap_resource(const char* label, void* *data, int64_t *bytes) {
     *data = g != null ? LockResource(g) : null;
     return *data != null ? 0 : 1;
 }
+
+// posix
+// https://pubs.opengroup.org/onlinepubs/009695399/functions/dlsym.html
+// https://pubs.opengroup.org/onlinepubs/009695399/functions/dlopen.html
+
+void* load_dl(const char* pathname) {
+    return LoadLibraryA(pathname); // dlopen() on Linux
+}
+
+void* find_symbol(void* dl, const char* symbol) {
+    return GetProcAddress(dl, symbol); // dlsym on Linux
+}
+
 
 #endif // RT_IMPLEMENTATION
 

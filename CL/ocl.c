@@ -1,9 +1,14 @@
-#include "rt.h"
+//#include <Windows.h>
 #include <CL/opencl.h>
-#include <assert.h>
-#include <windows.h>
+#include "rt.h"
 #include "ocl.h"
+
+#ifdef OCL_USE_NVIDIA_12_LIB_BINDINGS
+// C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.0\lib\x64\OpenCL.lib
+#pragma comment(lib, "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.0/lib/x64/OpenCL.lib")
+#else // dynamic bindings with OpenCL.dll on the path
 #include <CL/cl_bind.inc> // dynamically bind everything
+#endif
 
 static ocl_device_t ocl_devices[32]; // up to 32 GPUs supported
 
@@ -100,21 +105,24 @@ static void  ocl_unmap(ocl_context_t* c, ocl_memory_t m, const void* a) {
         0, null, null));
 }
 
-static ocl_program_t ocl_compile_program(ocl_context_t* c, const char* code, size_t bytes) {
+static ocl_program_t ocl_compile_program(ocl_context_t* c,
+        const char* code, size_t bytes, const char* options) {
     cl_int r = 0;
     cl_program p = clCreateProgramWithSource(c->c, 1, &code, &bytes, &r);
     not_null(p, r);
     // Build the program
     cl_device_id device_id = (cl_device_id)ocl.devices[c->ix].id;
-    r = clBuildProgram(p, 1, &device_id, null, null, null);
+    r = clBuildProgram(p, 1, &device_id, options, /*notify:*/ null, // sync
+        /* user_data: */null);
     if (r != 0) {
-        traceln("clBuildProgram() failed %s", ocl.error(r));
         static char log[16 * 1024];
         log[0] = 0;
-        call(clGetProgramBuildInfo(p, device_id, CL_PROGRAM_BUILD_LOG, countof(log), log, null) != 0);
+        // clGetProgramBuildInfo() returns invalid param if compiler crash
+        (void)clGetProgramBuildInfo(p, device_id, CL_PROGRAM_BUILD_LOG,
+            countof(log), log, null); // ignore errors
         traceln("%s", log);
-        fatal_if(true, "\n%s", ocl.error(r));
     }
+    fatal_if(r != 0, "clBuildProgram() failed %s", ocl.error(r));
     return (ocl_program_t)p;
 }
 
@@ -304,10 +312,10 @@ static void ocl_init(void) {
                 get_str(CL_DEVICE_NAME, d->name);
                 get_str(CL_DEVICE_VENDOR, d->vendor);
                 char version[128];
-                get_str(CL_DEVICE_OPENCL_C_VERSION, version);
+                get_str(CL_DEVICE_VERSION, version); // e.g. "OpenCL 3.0 CUDA"
                 int minor = 0; // sscanf wants type "int" not "int32_t"
                 int major = 0;
-                call(sscanf(version, "OpenCL C %d.%d", &major, &minor) != 2);
+                call(sscanf(version, "OpenCL %d.%d", &major, &minor) != 2);
                 d->version_major = major;
                 d->version_minor = minor;
                 get_str(CL_DEVICE_OPENCL_C_VERSION, version);
@@ -396,17 +404,39 @@ ocl_if ocl = {
     .devices = ocl_devices
 };
 
-// #pragma comment(lib, "OpenCL.lib")
+// C:\Windows\System32\OpenCL.dll
+// File description OpenCL Client DLL
+// Type Application extension
+// File version 3.0.3.0
+// Productname Khronos OpenCL ICD Loader
+// Product version 3.0.3.0
+// Copyright Copyright © The Khronos Group Inc 2016-2023
+// Date modified 1/20/2023 3:20 PM
+// Size: 1.41 MB (1,487,336 bytes)
+// Signed by
+// NVIDIA Sunday, January 15, 2023 11:18:06 AM
+// and
+// Microsoft Friday, January 20, 023 4:20:45 PM
 
-static void* OpenCL;
+#define OpenCL_dll "C:/Windows/System32/OpenCL.dll"
+
+// TODO: alternatives for Intel only GPU and AMD GPU? Do we need them?
+// e.g.:
+// C:\Windows\system32\Intel_OpenCL_ICD64.dll
+// C:\Windows\System32\DriverStore\FileRepository\iigd_dch.inf_amd64_9eaeaf7bfb6c744b
+// #define OpenCL_dll "Intel_OpenCL_ICD64.dll"
+
+static void* ocl_dl; // OpenCL dynamic library
 
 void* clBindFunction(const char* name) {
-    static bool init;
-    if (!init) { OpenCL = LoadLibrary("OpenCL.dll"); init = true; }
-    if (OpenCL != null) {
-        return (void*)GetProcAddress(OpenCL, name);
+    static bool inititialized;
+    if (!inititialized) {
+        ocl_dl = load_dl(OpenCL_dll);
+        // if not found, try anywheere else on the path:
+        if (ocl_dl == null) { ocl_dl = load_dl(OpenCL_dll); }
+        inititialized = true;
     }
-    return null;
+    return ocl_dl != null ? find_symbol(ocl_dl, name) : null;
 }
 
 static_assertion(CL_FP_DENORM                        == ocl_fp_denorm);

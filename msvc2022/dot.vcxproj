@@ -156,6 +156,7 @@
     <ClCompile Include="..\dot.c" />
     <ClCompile Include="..\gpu.c" />
     <ClCompile Include="..\rt.c" />
+    <ClCompile Include="..\tests.c" />
     <ClInclude Include="..\cl\cl.h" />
     <ClInclude Include="..\cl\cl_platform.h" />
     <ClInclude Include="..\cl\cl_version.h" />
@@ -169,6 +170,7 @@
     <ResourceCompile Include="..\dot.rc" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\CL\cl_bind.inc" />
     <None Include="..\gpu.cl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

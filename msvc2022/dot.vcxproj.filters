@@ -41,11 +41,15 @@
     </ClCompile>
     <ClCompile Include="..\dot.c" />
     <ClCompile Include="..\gpu.c" />
+    <ClCompile Include="..\tests.c" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\dot.rc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\gpu.cl" />
+    <None Include="..\CL\cl_bind.inc">
+      <Filter>CL</Filter>
+    </None>
   </ItemGroup>
 </Project>

@@ -61,7 +61,7 @@ static cl_int test(ocl_context_t* c) {
     "    int i = get_global_id(0);\n"
     "    z[i] = x[i] + y[i];\n"
     "}\n";
-    ocl_program_t p = ocl.compile_program(c, code, strlen(code));
+    ocl_program_t p = ocl.compile_program(c, code, strlen(code), null);
     ocl_kernel_t k = ocl.create_kernel(p, kernel_name);
     ocl_memory_t mx = ocl.allocate(c, ocl_allocate_write, N * sizeof(float));
     ocl_memory_t my = ocl.allocate(c, ocl_allocate_write, N * sizeof(float));

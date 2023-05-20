@@ -8,8 +8,8 @@
 - [x] Generated binding using GetProcAddress and trivial heared files parsing.
 - [x] Implemented 1-dimensional single command queue fail fast ocl.* interface.
 - [x] Implemented trivial host fp16_t support
-- [ ] Design gpu.* interface to unify OpenCL and possbily Cuda and/or OpenMP?
+- [ ] Design gpu.* interface to unify OpenCL and possbily Cuda and/or DirectCompute?
 - [ ] implement sum(v) measure perfromance of submitting to queue and reading results on host side
-- [ ] test 1dot.c for a) 1..16 x 1..16 dot() b) huge dataset clustered around 1.0+/-delta c) measure all performances on add.c 
+- [ ] test dot.c for a) 1..16 x 1..16 dot() b) huge dataset clustered around 1.0+/-delta c) measure all performances on add.c 
 - [ ] implement gemv()
 

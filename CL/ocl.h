@@ -48,7 +48,7 @@ typedef struct ocl_device_s {
     int64_t float_fp_config;
 } ocl_device_t;
 
-// ** confusion between CL and CL_C versions:
+// ** confusion between OpenCL devices and CL_C versions:
 // https://stackoverflow.com/questions/67371938/nvidia-opencl-device-version
 
 // *** NVIDIA GeForce RTX 3080 Laptop reports 48 units, but
@@ -128,7 +128,7 @@ typedef struct ocl_if {
     // memory must be unmapped before the kernel is executed
     void (*unmap)(ocl_context_t* c, ocl_memory_t m, const void* address);
     ocl_program_t (*compile_program)(ocl_context_t* c, const char* code,
-        size_t bytes);
+        size_t bytes, const char* options);
     ocl_kernel_t (*create_kernel)(ocl_program_t p, const char* name);
     void (*kernel_info)(ocl_context_t* c, ocl_kernel_t kernel,
         ocl_kernel_info_t* info);
