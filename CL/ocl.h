@@ -92,33 +92,51 @@ typedef struct ocl_kernel_info_s { // CL_KERNEL_*
 // https://registry.khronos.org/OpenCL/sdk/2.2/docs/man/html/clEnqueueNDRangeKernel.html
 // usage of "size" "max" is confusing in OpenCL docs this avoided here
 
+typedef struct ocl_profiling_s {
+    ocl_event_t e;
+    uint64_t queued; // in nanoseconds
+    uint64_t submit; // in nanoseconds
+    uint64_t start;  // in nanoseconds
+    uint64_t end;    // in nanoseconds
+    uint64_t count;  // number of time kernel was invoked
+    uint64_t i32ops; // guestimate of int32_t operations per kernel
+    uint64_t i64ops; // guestimate of int64_t operations per kernel
+    uint64_t fops;   // guestimate of fpXX_t  operations per kernel
+    // derivatives:
+    double  time; // seconds: end - start
+    double  gflops; // GFlops 1,000,000,000 float point operations
+    double  g32ops; // Giga int32 ops
+    double  g64ops; // Giga int64 ops
+    double  user; // seconds: host time (to be filled by client)
+//  uint64_t ema_samples; // 0 defaults to 128 samples
+//  struct { // exponential moving average
+//      double  user; // seconds: host time (to be calculated by client)
+//      double  time; // seconds: end - start
+//      double  gops; // Giga items per second
+//  } ema;
+} ocl_profiling_t;
+
+typedef struct ocl_override_s {
+    ocl_profiling_t* profiling;  // null - no profiling
+    int64_t max_profiling_count; // number of elemnts in profiling[] array
+    int64_t profiling_count;     // number of profiled kernel invocation
+    // To test and debug multi * groups * items logic max_groups and max_items
+    // can be overriden by client to much smaller values (see tests)
+    int64_t max_groups; // == 0 use GPU reported value
+    int64_t max_items;  // == 0 use GPU reported value
+} ocl_override_t;
+
 typedef struct ocl_context_s {
     int32_t ix; // device index
     void*   c; // OpenCL context
     void*   q; // OpenCL command queue
-    bool    profile; // cannot change on the fly
+    ocl_override_t* ov;
 } ocl_context_t;
 
 typedef struct ocl_arg_s {
     void* p;
     size_t bytes;
 } ocl_arg_t;
-
-typedef struct ocl_profiling_s { // in nanoseconds
-    uint64_t queued;
-    uint64_t submit;
-    uint64_t start;
-    uint64_t end;
-    double  user; // seconds: host time (to be filled by client)
-    double  time; // seconds: end - start
-    double  gops; // Giga items per second
-    uint64_t ema_samples; // 0 defaults to 128 samples
-    struct { // exponential moving average
-        double  user; // seconds: host time (to be calculated by client)
-        double  time; // seconds: end - start
-        double  gops; // Giga items per second
-    } ema;
-} ocl_profiling_t;
 
 enum { // .allocate() access flags (matching OpenCL)
     ocl_allocate_read  = (1 << 2),
@@ -137,7 +155,8 @@ enum { // .map() access flags (matching OpenCL)
 typedef struct ocl_if {
     void (*init)(void); // initializes devices[count] array
     void (*dump)(int ix); // dumps device info
-    ocl_context_t (*open)(int32_t ix, bool profiling);
+    ocl_context_t (*open)(int32_t ix, ocl_override_t* ocl_override);
+    bool (*is_profiling)(ocl_context_t* c);
     // pinned memory with CL_MEM_ALLOC_HOST_PTR
     ocl_memory_t (*allocate)(ocl_context_t* c, int access, size_t bytes);
     void (*flush)(ocl_context_t* c); // all queued command to GPU
@@ -159,8 +178,10 @@ typedef struct ocl_if {
         size_t groups, size_t items,
         int argc, ocl_arg_t argv[]);
     void (*wait)(ocl_event_t* events, int count);
-    // must wait() first before calling profile()
-    void (*profile)(ocl_event_t e, ocl_profiling_t* p, int64_t items);
+    // appends queued event to array of profiling events;
+    ocl_profiling_t* (*profile_add)(ocl_context_t* c, ocl_event_t e);
+    // must wait(&p->e, 1) or call .finish() before calling profile(p)
+    void (*profile)(ocl_profiling_t* p);
     void (*dispose_event)(ocl_event_t e);
     const char* (*error)(int result);
     void  (*dispose_program)(ocl_program_t p);

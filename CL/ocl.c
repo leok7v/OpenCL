@@ -31,9 +31,15 @@ static void ocl_error_notify(const char * errinfo,
     (void)user_data;
 }
 
-static void* ocl_create_queue(ocl_context_t* c, bool profile);
+static void* ocl_create_queue(ocl_context_t* c, bool profiling);
 
-static ocl_context_t ocl_open(int32_t ix, bool profile) {
+static bool ocl_is_profiling(const ocl_context_t* c) {
+    const bool profiling = c->ov != null && c->ov->max_profiling_count > 0;
+    if (profiling) { fatal_if(c->ov->profiling == null, "need array"); }
+    return profiling;
+}
+
+static ocl_context_t ocl_open(int32_t ix, ocl_override_t* ov) {
     ocl_context_t c;
     call(!(0 <= ix && ix < ocl.count));
     ocl_device_t* d = &ocl.devices[ix];
@@ -42,12 +48,12 @@ static ocl_context_t ocl_open(int32_t ix, bool profile) {
     };
     cl_int r = 0;
     cl_device_id id = (cl_device_id)d->id;
-    c.profile = profile;
+    c.ov = ov;
     c.ix = ix;
     /* user_data: null will be passed to notify() */
     c.c = clCreateContext(properties, 1, &id, ocl_error_notify, null, &r);
     not_null(c.c, r);
-    c.q = ocl_create_queue(&c, c.profile);
+    c.q = ocl_create_queue(&c, ocl.is_profiling(&c));
     return c;
 }
 
@@ -55,7 +61,7 @@ static void* ocl_create_queue(ocl_context_t* c, bool profiling) {
     cl_context ctx = c->c;
     cl_device_id device_id = (cl_device_id)ocl.devices[c->ix].id;
     cl_int r = 0;
-    static cl_command_queue_properties properties[] = {
+    static const cl_command_queue_properties properties[] = {
         CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0
     };
     cl_command_queue q = clCreateCommandQueueWithProperties(ctx, device_id,
@@ -153,29 +159,48 @@ static ocl_event_t ocl_enqueue_range_kernel(ocl_context_t* c,
     return (ocl_event_t)completion;
 }
 
-static void ocl_profile(ocl_event_t e, ocl_profiling_t* p, int64_t items) {
+static ocl_profiling_t* ocl_profile_add(ocl_context_t* c, ocl_event_t e) {
+    fatal_if(!ocl.is_profiling(c));
+    fatal_if(c->ov->profiling_count == c->ov->max_profiling_count,
+            "profiling[%lld] is too small", c->ov->max_profiling_count);
+    ocl_profiling_t* p = &c->ov->profiling[c->ov->profiling_count++];
+    memset(p, 0, sizeof(*p));
+    p->e = e;
+    return p;
+}
+
+static void ocl_profile(ocl_profiling_t* p) {
     #pragma push_macro("get_info")
-    #define get_info(n, v) do { \
-        call(clGetEventProfilingInfo((cl_event)e, n, sizeof(v), &v, null)); \
+    #define get_info(n, v) do {                                                \
+        call(clGetEventProfilingInfo((cl_event)p->e, n, sizeof(v), &v, null)); \
     } while (0)
     get_info(CL_PROFILING_COMMAND_QUEUED, p->queued);
     get_info(CL_PROFILING_COMMAND_SUBMIT, p->submit);
     get_info(CL_PROFILING_COMMAND_START, p->start);
     get_info(CL_PROFILING_COMMAND_END, p->end);
     #pragma pop_macro("get_info")
-    uint64_t ema_samples = p->ema_samples == 0 ? 128 : p->ema_samples;
-    // exponential moving average of 128 samples
-    const double ema_alpha = 1.0 / (double)ema_samples;
     p->time = (p->end - p->start) / (double)NSEC_IN_SEC;
-    if (items != 0) {
-        double seconds_per_item = p->time / items;
-        double ops_per_second = 1.0 / seconds_per_item;
-        p->gops = ops_per_second / (1000 * 1000 * 1000);
-        p->ema.gops = p->ema.gops * (1.0 - ema_alpha) + p->gops * ema_alpha;
-    } else {
-        p->gops = 0; // cannot determine for unknown number of items
+    if (p->count != 0) {
+        double seconds_per_kernel = p->time / p->count;
+        double invocations_per_second = 1.0 / seconds_per_kernel;
+        double gops = invocations_per_second / (1000 * 1000 * 1000);
+        p->gflops = p->fops * gops;
+        p->g32ops = p->i32ops * gops;
+        p->g64ops = p->i64ops * gops;
     }
-    p->ema.time = p->ema.time * (1.0 - ema_alpha) + p->time * ema_alpha;
+//  uint64_t ema_samples = p->ema_samples == 0 ? 128 : p->ema_samples;
+//  // exponential moving average of 128 samples
+//  const double ema_alpha = 1.0 / (double)ema_samples;
+//  p->time = (p->end - p->start) / (double)NSEC_IN_SEC;
+//  if (items != 0) {
+//      double seconds_per_item = p->time / items;
+//      double ops_per_second = 1.0 / seconds_per_item;
+//      p->gops = ops_per_second / (1000 * 1000 * 1000);
+//      p->ema.gops = p->ema.gops * (1.0 - ema_alpha) + p->gops * ema_alpha;
+//  } else {
+//      p->gops = 0; // cannot determine for unknown number of items
+//  }
+//  p->ema.time = p->ema.time * (1.0 - ema_alpha) + p->time * ema_alpha;
     // client is responsible updating and calculating .user fields
 }
 
@@ -416,6 +441,7 @@ ocl_if ocl = {
     .init = ocl_init,
     .dump = ocl_dump,
     .open = ocl_open,
+    .is_profiling = ocl_is_profiling,
     .error = ocl_error,
     .allocate = ocl_allocate,
     .deallocate = ocl_deallocate,
@@ -426,6 +452,7 @@ ocl_if ocl = {
     .kernel_info = ocl_kernel_info,
     .enqueue_range_kernel = ocl_enqueue_range_kernel,
     .wait = ocl_wait,
+    .profile_add = ocl_profile_add,
     .profile = ocl_profile,
     .dispose_event = ocl_dispose_event,
     .dispose_kernel = ocl_dispose_kernel,

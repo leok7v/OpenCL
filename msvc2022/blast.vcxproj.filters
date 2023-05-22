@@ -19,7 +19,6 @@
     <ClInclude Include="..\CL\ocl.h">
       <Filter>CL</Filter>
     </ClInclude>
-    <ClInclude Include="..\gpu.h" />
     <ClInclude Include="..\fp16.h">
       <Filter>rt</Filter>
     </ClInclude>
@@ -40,7 +39,6 @@
     <ClCompile Include="..\CL\ocl.c">
       <Filter>CL</Filter>
     </ClCompile>
-    <ClCompile Include="..\gpu.c" />
     <ClCompile Include="..\tests.c" />
     <ClCompile Include="..\blast.c" />
   </ItemGroup>

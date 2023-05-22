@@ -77,7 +77,9 @@ void*    find_symbol(void* dl, const char* symbol); // dlsym | GetProcAddress
 enum {
     NSEC_IN_USEC = 1000,
     NSEC_IN_MSEC = NSEC_IN_USEC * 1000,
-    NSEC_IN_SEC  = NSEC_IN_MSEC * 1000
+    NSEC_IN_SEC  = NSEC_IN_MSEC * 1000,
+    MSEC_IN_SEC  = 1000,
+    USEC_IN_SEC  = MSEC_IN_SEC * 1000
 };
 
 #define fatal_if(b, ...) do {                                    \
