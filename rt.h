@@ -31,6 +31,7 @@ void     traceline(const char* file, int line, const char* func,
 int      memmap_resource(const char* label, void* *data, int64_t *bytes);
 void*    load_dl(const char* pathname); // dlopen | LoadLibrary
 void*    find_symbol(void* dl, const char* symbol); // dlsym | GetProcAddress
+void     sleep(double seconds);
 
 #if defined(__GNUC__) || defined(__clang__)
 #define attribute_packed __attribute__((packed))
@@ -198,6 +199,39 @@ void* find_symbol(void* dl, const char* symbol) {
     return GetProcAddress(dl, symbol); // dlsym on Linux
 }
 
+void sleep(double seconds) {
+    assert(seconds >= 0);
+    if (seconds < 0) { seconds = 0; }
+    int64_t ns100 = (int64_t)(seconds * 1.0e+7); // in 0.1 us aka 100ns
+    typedef int (__stdcall *nt_delay_execution_t)(int alertable,
+        LARGE_INTEGER* delay_interval);
+    static nt_delay_execution_t NtDelayExecution;
+    // delay in 100-ns units. negative value means delay relative to current.
+    LARGE_INTEGER delay = {0}; // delay in 100-ns units.
+    delay.QuadPart = -ns100; // negative value means delay relative to current.
+    if (NtDelayExecution == null) {
+        static void* ntdll;
+        if (ntdll == null) { ntdll = load_dl("ntdll.dll"); }
+        fatal_if(ntdll == null);
+        NtDelayExecution = (nt_delay_execution_t)find_symbol(ntdll,
+            "NtDelayExecution");
+        fatal_if(NtDelayExecution == null);
+    }
+    //  If "alertable": false is set to true, wait state can break in
+    //  a result of NtAlertThread call.
+    NtDelayExecution(false, &delay);
+}
+
+/* POSIX:
+#include <time.h>
+void sleep(double seconds) {
+    struct timespec req = {
+       .tv_sec  = (uint64_t)seconds;
+       .tv_nsec = (uint64_t)(seconds * NSEC_IN_SEC) % NSEC_IN_SEC
+    };
+    nanosleep(&req, null);
+}
+*/
 
 #endif // RT_IMPLEMENTATION
 

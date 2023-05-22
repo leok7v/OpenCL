@@ -124,6 +124,8 @@ typedef struct ocl_override_s {
     // can be overriden by client to much smaller values (see tests)
     int64_t max_groups; // == 0 use GPU reported value
     int64_t max_items;  // == 0 use GPU reported value
+    int64_t max_groups_restore; // if max_groups was overriden it will be restored
+    int64_t max_items_restore;  // if max_items  was overriden it will be restored
 } ocl_override_t;
 
 typedef struct ocl_context_s {
@@ -182,10 +184,11 @@ typedef struct ocl_if {
     ocl_profiling_t* (*profile_add)(ocl_context_t* c, ocl_event_t e);
     // must wait(&p->e, 1) or call .finish() before calling profile(p)
     void (*profile)(ocl_profiling_t* p);
-    void (*dispose_event)(ocl_event_t e);
+    void (*retain_event)(ocl_event_t e);  // reference counter++
+    void (*release_event)(ocl_event_t e); // reference counter--
     const char* (*error)(int result);
-    void  (*dispose_program)(ocl_program_t p);
-    void  (*dispose_kernel)(ocl_kernel_t k);
+    void  (*release_program)(ocl_program_t p);
+    void  (*release_kernel)(ocl_kernel_t k);
     void (*close)(ocl_context_t* c);
     ocl_device_t* devices;
     int32_t count;

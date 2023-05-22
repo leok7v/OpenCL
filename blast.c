@@ -76,29 +76,32 @@ static void blast_unmap(blast_memory_t* bm) {
 // and where dot() optimizations may turn to be irrelevant and better
 // handled by AVX2/AVX512.
 
-static void blast_dot_compact(blast_t* b, int64_t groups, int64_t items,
-        blast_memory_t* v0, blast_memory_t* v1, blast_memory_t* r,
-        ocl_profiling_t* p, int fpp) {
+static void blast_dot_compact(int64_t groups, int64_t items,
+        blast_memory_t* v0, blast_memory_t* v1, blast_memory_t* r, int fpp) {
+    blast_t* b = v0->b;
+    ocl_context_t* c = b->c;
     ocl_arg_t dot_args[] = {
         {&v0->h, sizeof(ocl_memory_t)},
         {&v1->h, sizeof(ocl_memory_t)},
         {&r->h,  sizeof(ocl_memory_t)}
     };
 //  traceln("    n: %lld (groups: %lld * items: %lld) %lld total: %lld", n, groups, items, groups * items, total);
-    ocl_event_t e = ocl.enqueue_range_kernel(b->c,
+    ocl_event_t e = ocl.enqueue_range_kernel(c,
         b->dot_c[fpp], groups, items, countof(dot_args), dot_args);
-    // xxx TODO: cannot do profiling here w/o waiting for event
-    //           much more complex collect all events, for c->finish()
-    //           profile all.
-    (void)p;
-//  if (b->c->profiling) { ocl.profile(e, p, groups * items); }
-    ocl.dispose_event(e);
+    if (ocl.is_profiling(c)) {
+        ocl_profiling_t* p = ocl.profile_add(c, e);
+        p->count = groups * items;
+        p->fops = 1;
+    }
+    ocl.release_event(e);
 }
 
-static void blast_dot_strided(blast_t* b, int64_t groups, int64_t items,
+static void blast_dot_strided(int64_t groups, int64_t items,
         blast_memory_t* v0, int64_t o0, int64_t s0,
         blast_memory_t* v1, int64_t o1, int64_t s1,
-        blast_memory_t* r, ocl_profiling_t* p, int fpp) {
+        blast_memory_t* r,  int fpp) {
+    blast_t* b = v0->b;
+    ocl_context_t* c = b->c;
     ocl_arg_t dot_args[] = {
         {&v0->h, sizeof(ocl_memory_t)},
         {&o0,    sizeof(int32_t)},
@@ -109,18 +112,20 @@ static void blast_dot_strided(blast_t* b, int64_t groups, int64_t items,
         {&r->h,  sizeof(ocl_memory_t)}
     };
 //  traceln("    n: %lld (groups: %lld * items: %lld) %lld total: %lld", n, groups, items, groups * items, total);
-    ocl_event_t e = ocl.enqueue_range_kernel(b->c,
-        b->dot_os[fpp], groups, items, countof(dot_args), dot_args);
-    // xxx TODO: cannot do profiling here w/o waiting for event
-    //           much more complex collect all events, for c->finish()
-    //           profile all.
-//  if (b->c->profiling) { ocl.profile(e, p, groups * items); }
-    (void)p;
-    ocl.dispose_event(e);
+    ocl_event_t e = ocl.enqueue_range_kernel(c, b->dot_os[fpp],
+        groups, items, countof(dot_args), dot_args);
+    if (ocl.is_profiling(c)) {
+        ocl_profiling_t* p = ocl.profile_add(c, e);
+        p->count = groups * items;
+        p->fops = 1;
+        p->i32ops = 4;
+    }
+    ocl.release_event(e);
 }
 
-static fp64_t sum(blast_t* b, blast_memory_t* v, int64_t items, int64_t groups,
-        ocl_profiling_t* p, int fpp) {
+static fp64_t sum(blast_memory_t* v, int64_t items, int64_t groups, int fpp) {
+    blast_t* b = v->b;
+    ocl_context_t* c = b->c;
     int64_t total = items * groups;
     int64_t m = total;
     int64_t k = m / 2;
@@ -143,19 +148,20 @@ static fp64_t sum(blast_t* b, blast_memory_t* v, int64_t items, int64_t groups,
             items  >>= 1;
         }
         assertion(groups * items == k);
-        ocl_event_t e = ocl.enqueue_range_kernel(b->c, sum, groups, items,
+        ocl_event_t e = ocl.enqueue_range_kernel(c, sum, groups, items,
             countof(sum_args), sum_args);
-// TODO: xxx collect event and profile after .finish(q)???
-//      if (b->c->profiling) { ocl.profile(e, &p, n); }
-(void)p;
-        ocl.dispose_event(e);
+        if (ocl.is_profiling(c)) {
+            ocl_profiling_t* p = ocl.profile_add(c, e);
+            p->count = groups * items;
+            p->fops = 1;
+            p->i32ops = 1;
+        }
+        ocl.release_event(e);
         blast_memory_t* swap = v0; v0 = v1; v1 = swap;
         m  = k;
         k /= 2;
     }
-    ocl.finish(b->c); // same as waiting for chain of events
-//  e has been disposed above TODO: how?
-//  if (b->c->profiling) { ocl.profile(e, p, groups * items); }
+    ocl.finish(c); // same as waiting for chain of events
     void* a = blast.map(v0, blast_access_read, 0, blast_fpp_bytes[fpp]);
     fp64_t sum = 0;
     switch (fpp) {
@@ -173,15 +179,16 @@ static fp64_t blast_dot(
         blast_memory_t* v0, int64_t o0, int64_t s0,
         blast_memory_t* v1, int64_t o1, int64_t s1, int64_t n,
         int fpp) { // blast_fpp16, blast_fpp32, blast_fpp64
-    blast_t* b = v0->b;
     fatal_if(v0->b != v1->b, "foreign vectors");
     fatal_if(fpp < blast_fpp16 || blast_fpp64 < fpp, "fpp: %d", fpp);
-    ocl_profiling_t p = {0};
+    blast_t* b = v0->b;
+    ocl_context_t* c = b->c;
     fp64_t s = 0;
-    int64_t max_groups = ocl.devices[b->c->ix].max_groups;
-    int64_t max_items  = ocl.devices[b->c->ix].max_items[0];
-    #ifdef DEBUG // TODO: remove me after obtaining confidence in arithmetics
-    #endif
+    int64_t max_groups = ocl.devices[c->ix].max_groups;
+    int64_t max_items  = ocl.devices[c->ix].max_items[0];
+    if (ocl.is_profiling(c)) {
+        c->ov->profiling_count = 0;
+    }
     size_t bytes = blast_fpp_bytes[fpp];
     while (n > 0) {
         int64_t groups = min((n + max_items - 1) / max_items, max_groups);
@@ -195,22 +202,33 @@ static fp64_t blast_dot(
 // xxx TODO: int64_t offsets are not very expensive in kernel
 // strides are more expensive work out the change for large matrices
         if (o0 == 0 && s0 == 1 && o1 == 0 && s1 == 1) {
-            blast_dot_compact(b, groups, items, v0, v1, &r, &p, fpp);
+            blast_dot_compact(groups, items, v0, v1, &r, fpp);
         } else {
-            blast_dot_strided(b, groups, items, v0, o0, s0, v1, o1, s1,
-                &r, &p, fpp);
+            blast_dot_strided(groups, items, v0, o0, s0, v1, o1, s1, &r, fpp);
         }
-        s += sum(b, &r, items, groups, &p, fpp);
+        s += sum(&r, items, groups, fpp);
         blast.deallocate(&r);
         n  -= total;
         o0 += total;
         o1 += total;
     }
-//  TODO: turn me on later
-//  if (b->c->profiling) {
-//      traceln("dot_c[]: %.3f us (microseconds) Gops=%.3f",
-//          p.time * (1000 * 1000), p.gops);
-//  }
+    if (ocl.is_profiling(c) && c->ov->profiling_count) {
+        ocl_profiling_t* p = &c->ov->profiling[0];
+        for (int i = 1; i < c->ov->profiling_count; i++) {
+            ocl.profile(&p[i]);
+            if (i > 0) {
+                p[0].time   += p[i].time;
+                p[0].gflops += p[i].gflops;
+                p[0].i32ops += p[i].i64ops;
+                p[0].i64ops += p[i].i64ops;
+            }
+        }
+        p->gflops /= c->ov->profiling_count;
+        p->i32ops /= c->ov->profiling_count;
+        p->i64ops /= c->ov->profiling_count;
+        traceln("dot[%s]: %.3f us (microseconds) Gflops: %.6f",
+            blast_fpp_names[fpp], p->time * (1000 * 1000), p->gflops);
+    }
     return s;
 }
 
@@ -299,7 +317,7 @@ static void blast_init(blast_t* b, ocl_context_t* c) {
             b->dot_os[fp]      = ocl.create_kernel(p[fp], dot_os[fp]);
             b->gemv_c[fp]      = ocl.create_kernel(p[fp], gemv[fp]);
             b->gemv_os[fp]     = ocl.create_kernel(p[fp], gemv_os[fp]);
-            ocl.dispose_program(p[fp]);
+            ocl.release_program(p[fp]);
             switch (fp) {
                 case blast_fpp16: b->dot[fp] = blast_dot_fp16; break;
                 case blast_fpp32: b->dot[fp] = blast_dot_fp32; break;
@@ -317,14 +335,14 @@ static void blast_fini(blast_t* b) {
     int from = (d->fp_config & ocl_fp16) != 0 ? blast_fpp16 : blast_fpp32;
     int to   =  d->double_fp_config != 0 ? blast_fpp64 : blast_fpp32;
     for (int fp = from; fp <= to; fp++) {
-        ocl.dispose_kernel(b->sum_odd[fp]);
-        ocl.dispose_kernel(b->sum_odd_os[fp]);
-        ocl.dispose_kernel(b->sum_even[fp]);
-        ocl.dispose_kernel(b->sum_even_os[fp]);
-        ocl.dispose_kernel(b->dot_c[fp]);
-        ocl.dispose_kernel(b->dot_os[fp]);
-        ocl.dispose_kernel(b->gemv_c[fp]);
-        ocl.dispose_kernel(b->gemv_os[fp]);
+        ocl.release_kernel(b->sum_odd[fp]);
+        ocl.release_kernel(b->sum_odd_os[fp]);
+        ocl.release_kernel(b->sum_even[fp]);
+        ocl.release_kernel(b->sum_even_os[fp]);
+        ocl.release_kernel(b->dot_c[fp]);
+        ocl.release_kernel(b->dot_os[fp]);
+        ocl.release_kernel(b->gemv_c[fp]);
+        ocl.release_kernel(b->gemv_os[fp]);
     }
 }
 

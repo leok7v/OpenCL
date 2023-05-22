@@ -41,7 +41,7 @@ static void test_dot_free(test_dot_t* td) {
 }
 
 static void test_first_n(blast_t* b, int64_t n, int fpp,
-        int64_t offset, int64_t stride) {
+        int64_t offset, int64_t stride, bool verbose) {
     assert(1 <= n && n <= 16);
     #pragma push_macro("at")
     #define at(type, f, i) ((type*)td.f + offset + i * stride)
@@ -76,8 +76,10 @@ static void test_first_n(blast_t* b, int64_t n, int fpp,
     test_dot_free(&td);
     td.rse = td.expected - td.dot;
     td.rse = sqrt(td.rse * td.rse);
-    traceln("%s[%2d] %25.17f %25.17f rse: %.17f", blast_fpp_names[fpp], n,
-        td.dot, td.expected, td.rse);
+    if (verbose) {
+        traceln("%s[%2d] %25.17f %25.17f rse: %.17f", blast_fpp_names[fpp], n,
+            td.dot, td.expected, td.rse);
+    }
 }
 
 static void test(blast_t* b) {
@@ -129,7 +131,7 @@ static void test1() {
             for (int n = 1; n < 16; n++) {
                 for (int fpp = blast_fpp16; fpp <= blast_fpp64; fpp++) {
                     if (b.dot[fpp] != null) {
-                        test_first_n(&b, n, fpp, 0, 1);
+                        test_first_n(&b, n, fpp, 0, 1, true);
                     }
                 }
             }
@@ -159,7 +161,8 @@ static void test2() {
             for (int n = 1; n < 16; n++) {
                 for (int fpp = blast_fpp16; fpp <= blast_fpp64; fpp++) {
                     if (b.dot[fpp] != null) {
-                        test_first_n(&b, n, fpp, 0, 1);
+                        // TODO: need different test  1.0 +/- very small delta e.g. DBL_EPSILON, FLT_EPSILON, FP16_EPSILON * i
+                        test_first_n(&b, n, fpp, 0, 1, false);
                     }
                 }
             }
@@ -172,7 +175,6 @@ static void test2() {
 
 int32_t main(int32_t argc, const char* argv[]) {
     (void)argc; (void)argv;
-//  icd();
     ocl.init();
     test1();
     test2();

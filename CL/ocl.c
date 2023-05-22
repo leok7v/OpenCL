@@ -54,6 +54,18 @@ static ocl_context_t ocl_open(int32_t ix, ocl_override_t* ov) {
     c.c = clCreateContext(properties, 1, &id, ocl_error_notify, null, &r);
     not_null(c.c, r);
     c.q = ocl_create_queue(&c, ocl.is_profiling(&c));
+    if (ov != null) {
+        ov->max_groups_restore = d->max_groups;
+        ov->max_items_restore  = d->max_items[0];
+        if (0 < ov->max_groups && ov->max_groups < d->max_groups) {
+            d->max_groups = ov->max_groups;
+            traceln("device[%d] max_items: %lld overriden", ix, d->max_groups);
+        }
+        if (0 < ov->max_items && ov->max_items < d->max_items[0]) {
+            d->max_items[0] = ov->max_items;
+            traceln("device[%d] max_items: %lld overriden", ix, d->max_items[0]);
+        }
+    }
     return c;
 }
 
@@ -132,7 +144,7 @@ static ocl_program_t ocl_compile_program(ocl_context_t* c,
     return (ocl_program_t)p;
 }
 
-static void ocl_dispose_program(ocl_program_t p) {
+static void ocl_release_program(ocl_program_t p) {
     call(clReleaseProgram((cl_program)p));
 }
 
@@ -165,6 +177,7 @@ static ocl_profiling_t* ocl_profile_add(ocl_context_t* c, ocl_event_t e) {
             "profiling[%lld] is too small", c->ov->max_profiling_count);
     ocl_profiling_t* p = &c->ov->profiling[c->ov->profiling_count++];
     memset(p, 0, sizeof(*p));
+    ocl.retain_event(e); // increment reference count
     p->e = e;
     return p;
 }
@@ -188,6 +201,9 @@ static void ocl_profile(ocl_profiling_t* p) {
         p->g32ops = p->i32ops * gops;
         p->g64ops = p->i64ops * gops;
     }
+    ocl.release_event(p->e); // decrement refernce count
+    p->e = null;
+
 //  uint64_t ema_samples = p->ema_samples == 0 ? 128 : p->ema_samples;
 //  // exponential moving average of 128 samples
 //  const double ema_alpha = 1.0 / (double)ema_samples;
@@ -208,11 +224,15 @@ static void ocl_wait(ocl_event_t* events, int count) {
     call(clWaitForEvents(count, (cl_event*)events));
 }
 
-static void ocl_dispose_event(ocl_event_t e) {
+static void ocl_retain_event(ocl_event_t e) {
+    call(clRetainEvent((cl_event)e));
+}
+
+static void ocl_release_event(ocl_event_t e) {
     call(clReleaseEvent((cl_event)e));
 }
 
-static void ocl_dispose_kernel(ocl_kernel_t k) {
+static void ocl_release_kernel(ocl_kernel_t k) {
     call(clReleaseKernel((cl_kernel)k));
 }
 
@@ -236,6 +256,11 @@ static void ocl_kernel_info(ocl_context_t* c, ocl_kernel_t kernel,
 static void ocl_close(ocl_context_t* c) {
     ocl_dispose_queue(c);
     call(clReleaseContext((cl_context)c->c));
+    if (c->ov != null) {
+        ocl_device_t* d = &ocl.devices[c->ix];
+        d->max_groups   = c->ov->max_groups_restore;
+        d->max_items[0] = c->ov->max_items_restore;
+    }
     c->c = null;
 }
 
@@ -367,10 +392,13 @@ static void ocl_init(void) {
                 d->flavor |= ext("_intel_") ? ocl_intel  : 0;
                 d->flavor |= ext("_nv_")    ? ocl_nvidia : 0;
                 d->flavor |= ext("_amd_")   ? ocl_amd    : 0;
+                if (!d->fp_config) {
+                    // NVIDIA does not report cl_khr_fp16 extension
+                    d->fp_config |= ocl_fp16; // but supports it
+                }
 //              if (ext("cl_intel_accelerator")) { // see note: ***
 //                  d->fp_config &= ~ocl_fp64;
 //              }
-                d->fp_config |= ocl_fp16;
                 ocl.count++;
             }
         }
@@ -454,9 +482,10 @@ ocl_if ocl = {
     .wait = ocl_wait,
     .profile_add = ocl_profile_add,
     .profile = ocl_profile,
-    .dispose_event = ocl_dispose_event,
-    .dispose_kernel = ocl_dispose_kernel,
-    .dispose_program = ocl_dispose_program,
+    .retain_event = ocl_retain_event,
+    .release_event = ocl_release_event,
+    .release_kernel = ocl_release_kernel,
+    .release_program = ocl_release_program,
     .flush = ocl_flush,
     .finish = ocl_finish,
     .close = ocl_close,
