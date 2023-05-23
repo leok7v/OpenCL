@@ -17,9 +17,6 @@
 extern "C" {
 #endif
 
-// float point precision index
-enum { fpp16 = 0, fpp32 = 1, fpp64 = 2 };
-
 #ifndef countof
     #define countof(a) (sizeof(a) / sizeof((a)[0])) // MS is _countof()
 #endif

@@ -7,16 +7,17 @@
 // because fpp and access enums are used to index arrays they must be compact
 // with exact ordering:
 
-static_assert(fpp16 == 0 && fpp32 == 1 && fpp64 == 2, "order");
+static_assert(blast_fpp16 == 0 && blast_fpp32 == 1 && blast_fpp64 == 2, "order");
+
+const char* blast_fpp_names[3] = {"fp16", "fp32", "fp64"};
+
+const int blast_fpp_bytes[3] = {
+    (int)sizeof(fp16_t), (int)sizeof(fp32_t), (int)sizeof(fp64_t)
+};
+
 static_assert(blast_access_read  == 0, "order");
 static_assert(blast_access_write == 1, "order");
 static_assert(blast_access_rw    == 2, "order");
-
-const char* fpp_names[3] = {"fp16", "fp32", "fp64"};
-
-const int fpp_bytes[3] = {
-    (int)sizeof(fp16_t), (int)sizeof(fp32_t), (int)sizeof(fp64_t)
-};
 
 static int blast_alloc_access_to_ocl[] = {
     ocl_allocate_read,
@@ -86,10 +87,13 @@ static void blast_dot_compact(int64_t groups, int64_t items,
         {&r->h,  sizeof(ocl_memory_t)}
     };
 //  traceln("    n: %lld (groups: %lld * items: %lld) %lld total: %lld", n, groups, items, groups * items, total);
+    double user = ocl.is_profiling(c) ? seconds() : 0;
     ocl_event_t e = ocl.enqueue_range_kernel(c,
         b->dot_c[fpp], groups, items, countof(dot_args), dot_args);
+    user = ocl.is_profiling(c) ? (seconds() - user) : 0;
     if (ocl.is_profiling(c)) {
         ocl_profiling_t* p = ocl.profile_add(c, e);
+        p->user = user;
         p->count = groups * items;
         p->fops = 1;
     }
@@ -112,10 +116,13 @@ static void blast_dot_strided(int64_t groups, int64_t items,
         {&r->h,  sizeof(ocl_memory_t)}
     };
 //  traceln("    n: %lld (groups: %lld * items: %lld) %lld total: %lld", n, groups, items, groups * items, total);
+    double user = ocl.is_profiling(c) ? seconds() : 0;
     ocl_event_t e = ocl.enqueue_range_kernel(c, b->dot_os[fpp],
         groups, items, countof(dot_args), dot_args);
+    user = ocl.is_profiling(c) ? (seconds() - user) : 0;
     if (ocl.is_profiling(c)) {
         ocl_profiling_t* p = ocl.profile_add(c, e);
+        p->user = user;
         p->count = groups * items;
         p->fops = 1;
         p->i32ops = 4;
@@ -131,7 +138,7 @@ static fp64_t sum(blast_memory_t* v, int64_t items, int64_t groups, int fpp) {
     int64_t k = m / 2;
     // Only (total / 2) elements are used for result. Single extra element
     // is added to avoid allocation of zero bytes when total = 1
-    int64_t half = (total + 1) / 2 * fpp_bytes[fpp];
+    int64_t half = (total + 1) / 2 * blast_fpp_bytes[fpp];
     blast_memory_t  s = blast.allocate(v->b, blast_access_read, half);
     blast_memory_t* v0 = v;
     blast_memory_t* v1 = &s;
@@ -140,18 +147,20 @@ static fp64_t sum(blast_memory_t* v, int64_t items, int64_t groups, int fpp) {
             {&v0->h,  sizeof(ocl_memory_t)},
             {&v1->h,  sizeof(ocl_memory_t)}
         };
-        ocl_kernel_t sum = m % 2 == 0 ?
-            b->sum_even[fpp] : b->sum_odd[fpp];
+        ocl_kernel_t sum = m % 2 == 0 ? b->sum_even[fpp] : b->sum_odd[fpp];
         if (groups > 1) {
             groups >>= 1;
         } else if (items  > 0) {
             items  >>= 1;
         }
         assertion(groups * items == k);
+        double user = ocl.is_profiling(c) ? seconds() : 0;
         ocl_event_t e = ocl.enqueue_range_kernel(c, sum, groups, items,
             countof(sum_args), sum_args);
+        user = ocl.is_profiling(c) ? (seconds() - user) : 0;
         if (ocl.is_profiling(c)) {
             ocl_profiling_t* p = ocl.profile_add(c, e);
+            p->user = user;
             p->count = groups * items;
             p->fops = 1;
             p->i32ops = 1;
@@ -162,12 +171,12 @@ static fp64_t sum(blast_memory_t* v, int64_t items, int64_t groups, int fpp) {
         k /= 2;
     }
     ocl.finish(c); // same as waiting for chain of events
-    void* a = blast.map(v0, blast_access_read, 0, fpp_bytes[fpp]);
+    void* a = blast.map(v0, blast_access_read, 0, blast_fpp_bytes[fpp]);
     fp64_t sum = 0;
     switch (fpp) {
-        case fpp16: sum = fp16to32(*(fp16_t*)a); break;
-        case fpp32: sum = *(fp32_t*)a; break;
-        case fpp64: sum = *(fp64_t*)a; break;
+        case blast_fpp16: sum = fp16to32(*(fp16_t*)a); break;
+        case blast_fpp32: sum = *(fp32_t*)a; break;
+        case blast_fpp64: sum = *(fp64_t*)a; break;
         default: fatal_if("fpp", "%d", fpp); break;
     }
     blast.unmap(v0);
@@ -178,9 +187,9 @@ static fp64_t sum(blast_memory_t* v, int64_t items, int64_t groups, int fpp) {
 static fp64_t blast_dot(
         blast_memory_t* v0, int64_t o0, int64_t s0,
         blast_memory_t* v1, int64_t o1, int64_t s1, int64_t n,
-        int fpp) { // fpp16, fpp32, fpp64
+        int fpp) { // blast_fpp16, blast_fpp32, blast_fpp64
     fatal_if(v0->b != v1->b, "foreign vectors");
-    fatal_if(fpp < fpp16 || fpp64 < fpp, "fpp: %d", fpp);
+    fatal_if(fpp < blast_fpp16 || blast_fpp64 < fpp, "fpp: %d", fpp);
     blast_t* b = v0->b;
     ocl_context_t* c = b->c;
     fp64_t s = 0;
@@ -189,7 +198,7 @@ static fp64_t blast_dot(
     if (ocl.is_profiling(c)) {
         c->ov->profiling_count = 0;
     }
-    size_t bytes = fpp_bytes[fpp];
+    size_t bytes = blast_fpp_bytes[fpp];
     while (n > 0) {
         int64_t groups = min((n + max_items - 1) / max_items, max_groups);
         assertion(n >= (groups - 1) * max_items);
@@ -198,7 +207,7 @@ static fp64_t blast_dot(
         int64_t items = total / groups;
         assertion(items > 0 && groups > 0 && items * groups <= n);
         assertion(total == groups * items);
-        blast_memory_t r = blast.allocate(b, blast_access_read, n * bytes);
+        blast_memory_t r = blast.allocate(b, blast_access_read, total * bytes);
 // xxx TODO: int64_t offsets are not very expensive in kernel
 // strides are more expensive work out the change for large matrices
         if (o0 == 0 && s0 == 1 && o1 == 0 && s1 == 1) {
@@ -206,11 +215,26 @@ static fp64_t blast_dot(
         } else {
             blast_dot_strided(groups, items, v0, o0, s0, v1, o1, s1, &r, fpp);
         }
+#if 0 && defined(DEBUG)
+        if (fpp == blast_fpp16) {
+            fp16_t* zz = blast.map(&r, blast_access_read, 0, total * bytes);
+            for (int i = 0; i < total; i++) {
+                traceln("zz[%d]: %.1f", i, fp16to32(zz[i]));
+            }
+            blast.unmap(&r);
+        } else if (fpp == blast_fpp32) {
+            fp32_t* zz = blast.map(&r, blast_access_read, 0, total * bytes);
+            for (int i = 0; i < total; i++) {
+                traceln("zz[%d]: %.1f", i, zz[i]);
+            }
+            blast.unmap(&r);
+        }
+#endif
         s += sum(&r, items, groups, fpp);
         blast.deallocate(&r);
         n  -= total;
-        o0 += total;
-        o1 += total;
+        o0 += total * s0;
+        o1 += total * s1;
     }
     if (ocl.is_profiling(c) && c->ov->profiling_count) {
         ocl_profiling_t* p = &c->ov->profiling[0];
@@ -218,6 +242,7 @@ static fp64_t blast_dot(
             ocl.profile(&p[i]);
             if (i > 0) {
                 p[0].time   += p[i].time;
+                p[0].user   += p[i].user;
                 p[0].gflops += p[i].gflops;
                 p[0].i32ops += p[i].i64ops;
                 p[0].i64ops += p[i].i64ops;
@@ -226,8 +251,6 @@ static fp64_t blast_dot(
         p->gflops /= c->ov->profiling_count;
         p->i32ops /= c->ov->profiling_count;
         p->i64ops /= c->ov->profiling_count;
-        traceln("dot[%s]: %.3f us (microseconds) Gflops: %.6f",
-            fpp_names[fpp], p->time * (1000 * 1000), p->gflops);
     }
     return s;
 }
@@ -235,19 +258,19 @@ static fp64_t blast_dot(
 static fp64_t blast_dot_fp16(
         blast_memory_t* v0, int64_t o0, int64_t s0,
         blast_memory_t* v1, int64_t o1, int64_t s1, int64_t n) {
-    return blast_dot(v0, o0, s0, v1, o1, s1, n, fpp16);
+    return blast_dot(v0, o0, s0, v1, o1, s1, n, blast_fpp16);
 }
 
 static fp64_t blast_dot_fp32(
         blast_memory_t* v0, int64_t o0, int64_t s0,
         blast_memory_t* v1, int64_t o1, int64_t s1, int64_t n) {
-    return blast_dot(v0, o0, s0, v1, o1, s1, n, fpp32);
+    return blast_dot(v0, o0, s0, v1, o1, s1, n, blast_fpp32);
 }
 
 static fp64_t blast_dot_fp64(
         blast_memory_t* v0, int64_t o0, int64_t s0,
         blast_memory_t* v1, int64_t o1, int64_t s1, int64_t n) {
-    return blast_dot(v0, o0, s0, v1, o1, s1, n, fpp64);
+    return blast_dot(v0, o0, s0, v1, o1, s1, n, blast_fpp64);
 }
 
 static const char* blast_program_options(blast_t* b, int fpp) {
@@ -269,7 +292,7 @@ static const char* blast_program_options(blast_t* b, int fpp) {
     append("-cl-std=CL%d.%d ", d->c_version_major, d->c_version_minor);
     append("-D fp_t=%s -D vec4=%s4 -D vec8=%s8 -D vec16=%s16 -D suffix=%s %s ",
            fp_t, fp_t,fp_t, fp_t, suffix[fpp],
-          (fpp == fpp16 ? "-D fp16_surrogate" : ""));
+          (fpp == blast_fpp16 ? "-D fp16_surrogate" : ""));
     #pragma pop_macro("append")
     *p = 0;
 //  traceln("options: %s", options);
@@ -278,7 +301,7 @@ static const char* blast_program_options(blast_t* b, int fpp) {
 
 static ocl_program_t blast_compile(blast_t* b, int fpp,
         const void* code, int bytes) {
-//  traceln("\nfpp: %s\n%*.*s\n\n", fpp_names[fpp], bytes, bytes, code);
+//  traceln("\nfpp: %s\n%*.*s\n\n", blast_fpp_names[fpp], bytes, bytes, code);
     const char* opts = blast_program_options(b, fpp);
     return ocl.compile_program(b->c, code, bytes, opts);
 }
@@ -295,9 +318,9 @@ static void blast_init(blast_t* b, ocl_context_t* c) {
     const bool has_fp16 = (d->fp_config & ocl_fp16) != 0;
     const bool has_fp64 =  d->double_fp_config != 0;
     ocl_program_t p[3] = {
-        has_fp16 ? blast_compile(b, fpp16, code, bytes) : null,
-        blast_compile(b, fpp32, code, bytes),
-        has_fp64 ? blast_compile(b, fpp64, code, bytes) : null
+        has_fp16 ? blast_compile(b, blast_fpp16, code, bytes) : null,
+        blast_compile(b, blast_fpp32, code, bytes),
+        has_fp64 ? blast_compile(b, blast_fpp64, code, bytes) : null
     };
     static const char* sum_odd[]     = {"sum_odd_fp16",     "sum_odd_fp32",     "sum_odd_fp64"};
     static const char* sum_odd_os[]  = {"sum_odd_os_fp16",  "sum_odd_os_fp32",  "sum_odd_os_fp64"};
@@ -307,7 +330,7 @@ static void blast_init(blast_t* b, ocl_context_t* c) {
     static const char* dot_os[]      = {"dot_os_fp16",      "dot_os_fp32",      "dot_os_fp64"};
     static const char* gemv[]        = {"gemv_fp16",        "gemv_fp32",        "gemv_fp64"};
     static const char* gemv_os[]     = {"gemv_os_fp16",     "gemv_os_fp32",     "gemv_os_fp64"};
-    for (int fp = fpp16; fp <= fpp64; fp++) {
+    for (int fp = blast_fpp16; fp <= blast_fpp64; fp++) {
         if (p[fp] != null) {
             b->sum_odd[fp]     = ocl.create_kernel(p[fp], sum_odd[fp]);
             b->sum_odd_os[fp]  = ocl.create_kernel(p[fp], sum_odd_os[fp]);
@@ -319,9 +342,9 @@ static void blast_init(blast_t* b, ocl_context_t* c) {
             b->gemv_os[fp]     = ocl.create_kernel(p[fp], gemv_os[fp]);
             ocl.release_program(p[fp]);
             switch (fp) {
-                case fpp16: b->dot[fp] = blast_dot_fp16; break;
-                case fpp32: b->dot[fp] = blast_dot_fp32; break;
-                case fpp64: b->dot[fp] = blast_dot_fp64; break;
+                case blast_fpp16: b->dot[fp] = blast_dot_fp16; break;
+                case blast_fpp32: b->dot[fp] = blast_dot_fp32; break;
+                case blast_fpp64: b->dot[fp] = blast_dot_fp64; break;
                 default: fatal_if("never");
             }
         }
@@ -332,8 +355,8 @@ static void blast_fini(blast_t* b) {
     ocl_device_t* d = &ocl.devices[b->c->ix];
     // all known GPU support at least fp32_t but many do not support
     // fp16_t and/or fp64_t
-    int from = (d->fp_config & ocl_fp16) != 0 ? fpp16 : fpp32;
-    int to   =  d->double_fp_config != 0 ? fpp64 : fpp32;
+    int from = (d->fp_config & ocl_fp16) != 0 ? blast_fpp16 : blast_fpp32;
+    int to   =  d->double_fp_config != 0 ? blast_fpp64 : blast_fpp32;
     for (int fp = from; fp <= to; fp++) {
         ocl.release_kernel(b->sum_odd[fp]);
         ocl.release_kernel(b->sum_odd_os[fp]);

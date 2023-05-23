@@ -1,4 +1,3 @@
-//#include <Windows.h>
 #include <CL/opencl.h>
 #include "rt.h"
 #include "ocl.h"
@@ -164,8 +163,8 @@ static ocl_event_t ocl_enqueue_range_kernel(ocl_context_t* c,
     cl_event completion = null;
     size_t total = groups * items_per_group;
     ocl_device_t* d = &ocl.devices[c->ix]; (void)d;
-    assertion((int64_t)groups <= d->max_groups);
-    assertion((int64_t)items_per_group <= d->max_items[0]);
+    assert((int64_t)groups <= d->max_groups);
+    assert((int64_t)items_per_group <= d->max_items[0]);
     call(clEnqueueNDRangeKernel((cl_command_queue)c->q, (cl_kernel)k,
             1, null, &total, &items_per_group, 0, null, &completion));
     return (ocl_event_t)completion;
@@ -192,7 +191,10 @@ static void ocl_profile(ocl_profiling_t* p) {
     get_info(CL_PROFILING_COMMAND_START, p->start);
     get_info(CL_PROFILING_COMMAND_END, p->end);
     #pragma pop_macro("get_info")
+    static double sum;
     p->time = (p->end - p->start) / (double)NSEC_IN_SEC;
+//  sum += p->time;
+//  traceln("time: %.6fus sum: %.6fus", p->time * USEC_IN_SEC, sum * USEC_IN_SEC);
     if (p->count != 0) {
         double seconds_per_kernel = p->time / p->count;
         double invocations_per_second = 1.0 / seconds_per_kernel;
@@ -392,7 +394,7 @@ static void ocl_init(void) {
                 d->flavor |= ext("_intel_") ? ocl_intel  : 0;
                 d->flavor |= ext("_nv_")    ? ocl_nvidia : 0;
                 d->flavor |= ext("_amd_")   ? ocl_amd    : 0;
-                if (!d->fp_config) {
+                if ((d->fp_config & ocl_fp16) == 0) {
                     // NVIDIA does not report cl_khr_fp16 extension
                     d->fp_config |= ocl_fp16; // but supports it
                 }
