@@ -42,7 +42,7 @@ static void x_add_y(ocl_context_t* c, ocl_kernel_t k,
     ocl_event_t done = ocl.enqueue_range_kernel(c, k, groups, items,
         countof(args), args);
     ocl_profiling_t* p = ocl.is_profiling(c) ? ocl.profile_add(c, done) : null;
-    // flash() and finish() are unnecessary because ocl.wait(done)
+    // flush() and finish() are unnecessary because ocl.wait(done)
 //  ocl.flush(c);
 //  ocl.finish(c);
     ocl.wait(&done, 1);
@@ -60,8 +60,8 @@ static void x_add_y(ocl_context_t* c, ocl_kernel_t k,
         // measure the same addition of N numbers on CPU
         // L1: 640KB L2: 10MB L3: 24MB guessing L3 may be 4 associative
         int64_t bytes = 24 * 4 * MB;
-        byte_t* flash_caches = (byte_t*)malloc(bytes);
-        for (int i = 0; i < bytes; i++) { flash_caches[i] = (byte_t)i; }
+        byte_t* flush_caches = (byte_t*)malloc(bytes);
+        for (int i = 0; i < bytes; i++) { flush_caches[i] = (byte_t)i; }
         host = seconds();
         for (int32_t i = 0; i < n; i++) { Z[i] = X[i] + Y[i]; }
         host = seconds() - host;
@@ -69,7 +69,7 @@ static void x_add_y(ocl_context_t* c, ocl_kernel_t k,
         for (int32_t i = 0; i < n; i++) {
             fatal_if(Z[i] != z[i], "%.1f + %.1f = %.1f\n", X[i], Y[i], z[i]);
         }
-        free(flash_caches);
+        free(flush_caches);
     } else { // just verify result:
         for (int32_t i = 0; i < n; i++) {
             fatal_if(X[i] + Y[i] != z[i], "%.1f + %.1f = %.1f instead of %.1f\n",

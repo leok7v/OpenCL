@@ -154,6 +154,7 @@
   <ItemGroup>
     <ClCompile Include="..\blast.c" />
     <ClCompile Include="..\CL\ocl.c" />
+    <ClCompile Include="..\dot.c" />
     <ClCompile Include="..\rt.c" />
     <ClCompile Include="..\tests.c" />
     <ClInclude Include="..\blast.h" />
@@ -162,6 +163,7 @@
     <ClInclude Include="..\cl\cl_version.h" />
     <ClInclude Include="..\CL\ocl.h" />
     <ClInclude Include="..\cl\opencl.h" />
+    <ClInclude Include="..\dot.h" />
     <ClInclude Include="..\fp16.h" />
     <ClInclude Include="..\rt.h" />
   </ItemGroup>

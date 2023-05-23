@@ -156,7 +156,7 @@ inline fp32_t fp16to32(fp16_t fp16) {
         exponent++;
         mantissa &= 0x7FFFFF; // remove hidden bit
         result = sign | (exponent << 23) | mantissa;
-        traceln("normalized result: 0x%08X", result);
+//      traceln("normalized result: 0x%08X", result);
     } else {
         assert(mantissa == 0 && exponent == 0, "+/- zero");
         result = sign;

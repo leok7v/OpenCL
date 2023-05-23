@@ -23,6 +23,7 @@
       <Filter>rt</Filter>
     </ClInclude>
     <ClInclude Include="..\blast.h" />
+    <ClInclude Include="..\dot.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="CL">
@@ -41,6 +42,7 @@
     </ClCompile>
     <ClCompile Include="..\tests.c" />
     <ClCompile Include="..\blast.c" />
+    <ClCompile Include="..\dot.c" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\CL\cl_bind.inc">

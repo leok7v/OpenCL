@@ -55,13 +55,13 @@ static void test_first_n(blast_t* b, int64_t n, int fpp,
     }
     td.expected = 0;
     for (int i = 0; i < n; i++) {
-        if (fpp == blast_fpp16) {
+        if (fpp == fpp16) {
             *at(fp16_t, a0, i) = fp32to16((fp32_t)(i + 1));
             *at(fp16_t, a1, i) = fp32to16((fp32_t)(n - i));
-        } else if (fpp == blast_fpp32) {
+        } else if (fpp == fpp32) {
             *at(fp32_t, a0, i) = (fp32_t)(i + 1);
             *at(fp32_t, a1, i) = (fp32_t)(n - i);
-        } else if (fpp == blast_fpp64) {
+        } else if (fpp == fpp64) {
             *at(fp64_t, a0, i) = (fp64_t)(i + 1);
             *at(fp64_t, a1, i) = (fp64_t)(n - i);
         } else {
@@ -77,7 +77,7 @@ static void test_first_n(blast_t* b, int64_t n, int fpp,
     td.rse = td.expected - td.dot;
     td.rse = sqrt(td.rse * td.rse);
     if (verbose) {
-        traceln("%s[%2d] %25.17f %25.17f rse: %.17f", blast_fpp_names[fpp], n,
+        traceln("%s[%2d] %25.17f %25.17f rse: %.17f", fpp_names[fpp], n,
             td.dot, td.expected, td.rse);
     }
 }
@@ -102,7 +102,7 @@ y[i] = (fp32_t)(i + 1);
         }
         blast.unmap(&m1);
         blast.unmap(&m0);
-        fp64_t dot = b->dot[blast_fpp32](&m0, 0, 1, &m1, 0, 1, n);
+        fp64_t dot = b->dot[fpp32](&m0, 0, 1, &m1, 0, 1, n);
         blast.deallocate(&m0);
         blast.deallocate(&m1);
         double rse = sqrt(pow(dot - sum, 2));
@@ -129,7 +129,7 @@ static void test1() {
             blast_t b = { 0 };
             blast.init(&b, &c);
             for (int n = 1; n < 16; n++) {
-                for (int fpp = blast_fpp16; fpp <= blast_fpp64; fpp++) {
+                for (int fpp = fpp16; fpp <= fpp64; fpp++) {
                     if (b.dot[fpp] != null) {
                         test_first_n(&b, n, fpp, 0, 1, true);
                     }
@@ -159,7 +159,7 @@ static void test2() {
             blast_t b = { 0 };
             blast.init(&b, &c);
             for (int n = 1; n < 16; n++) {
-                for (int fpp = blast_fpp16; fpp <= blast_fpp64; fpp++) {
+                for (int fpp = fpp16; fpp <= fpp64; fpp++) {
                     if (b.dot[fpp] != null) {
                         // TODO: need different test  1.0 +/- very small delta e.g. DBL_EPSILON, FLT_EPSILON, FP16_EPSILON * i
                         test_first_n(&b, n, fpp, 0, 1, false);
@@ -173,8 +173,11 @@ static void test2() {
     }
 }
 
+void dot_test();
+
 int32_t main(int32_t argc, const char* argv[]) {
     (void)argc; (void)argv;
+    dot_test();
     ocl.init();
     test1();
     test2();
