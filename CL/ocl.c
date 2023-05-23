@@ -352,11 +352,11 @@ static void ocl_init(void) {
     // Get platform and device information
     cl_platform_id platforms[16] = {0};
     cl_uint platform_count = countof(platforms);
-	call(clGetPlatformIDs(platform_count, platforms, null));
+	call(clGetPlatformIDs(countof(platforms), platforms, &platform_count));
     for (cl_uint i = 0; i < platform_count; i++) {
         cl_device_id device_ids[16] = {0};
         cl_uint devids_count = 0;
-	    if (clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 1,
+	    if (clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, countof(device_ids),
                 device_ids, &devids_count) == 0) {
             for (cl_uint j = 0; j < devids_count; j++) {
                 ocl_device_t* d = &ocl.devices[ocl.count];

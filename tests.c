@@ -101,6 +101,7 @@ static void test_permutations() {
         .max_items = 4
     };
     for (int i = 0; i < ocl.count; i++) {
+        ocl.dump(i);
         ocl_context_t c = ocl.open(i, &ov0); // test on small groups/items
         traceln("%s\n", ocl.devices[i].name);
         blast_t b = { 0 };
@@ -215,8 +216,8 @@ void dot_test();
 
 static void dot_tests() {
 //  dot_test();
-//  test_permutations();
-    test_performance();
+    test_permutations();
+//  test_performance();
 }
 
 int32_t main(int32_t argc, const char* argv[]) {

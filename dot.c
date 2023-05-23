@@ -41,8 +41,8 @@ typedef struct avx512_if {
 static void avx2_init(void);
 static void avx512_init(void);
 
-static avx2_if avx2   = { .init = avx2_init };
-static avx2_if avx512 = { .init = avx512_init };
+static avx2_if   avx2   = { .init = avx2_init };
+static avx512_if avx512 = { .init = avx512_init };
 
 static inline fp64_t cpu_dot16_c(const fp16_t* restrict v0,
         const fp16_t* restrict v1, int64_t n) {
@@ -91,8 +91,6 @@ static inline fp64_t cpu_dot64_s(const fp64_t* restrict v0, int64_t s0,
 
 static fp64_t dot16_c(const fp16_t *v0, const fp16_t* v1, int64_t n) {
     prefetch2_L1L2L3(v0, v1);
-    static bool init;
-    if (!init) { avx2.init(); avx512.init(); init = true;}
     if (n >= 16 && avx512.dot16_c != null) {
         return avx512.dot16_c(v0, v1, n);
     } else if (n >= 8 && avx2.dot16_c != null) {
@@ -301,25 +299,45 @@ static fp64_t avx512_dot_f64(const fp64_t* restrict v0, const fp64_t* restrict v
 // provision for that:
 // https://learn.microsoft.com/en-us/windows/win32/dxmath/half-data-type
 
-static void avx512_init(void) {
-    fp64_t d0[16] = { 0 };
-    fp64_t d1[16] = { 0 };
+
+static void avx2_init(void) {
     __try {
-        avx512_dot_f64(d0, d1, countof(d0));
-        avx512.dot32_c = avx512_dot_f32;
-        avx512.dot64_c = avx512_dot_f64;
+        fp32_t d0[16] = { 0 };
+        fp32_t d1[16] = { 0 };
+        fp64_t r = avx2_dot_f32(d0, d1, countof(d0));
+        avx2.dot32_c = avx2_dot_f32;
+        fatal_if(r != 0); // prevents optimizing out
+    }
+    __except (1) {
+    }
+    __try {
+        fp64_t d0[16] = { 0 };
+        fp64_t d1[16] = { 0 };
+        fp64_t r = avx2_dot_f64(d0, d1, countof(d0));
+        avx2.dot64_c = avx2_dot_f64;
+        fatal_if(r != 0);
     } __except(1) {
     }
 }
 
-static void avx2_init(void) {
-    fp64_t d0[16] = { 0 };
-    fp64_t d1[16] = { 0 };
+static void avx512_init(void) {
     __try {
-        avx2_dot_f64(d0, d1, countof(d0));
-        avx2.dot32_c = avx2_dot_f32;
-        avx2.dot64_c = avx2_dot_f64;
-    } __except(1) {
+        fp32_t d0[16] = { 0 };
+        fp32_t d1[16] = { 0 };
+        fp64_t r = avx512_dot_f32(d0, d1, countof(d0));
+        avx512.dot32_c = avx512_dot_f32;
+        fatal_if(r != 0);
+    }
+    __except (1) {
+    }
+    __try {
+        fp64_t d0[16] = { 0 };
+        fp64_t d1[16] = { 0 };
+        fp64_t r = avx512_dot_f64(d0, d1, countof(d0));
+        avx512.dot64_c = avx512_dot_f64;
+        fatal_if(r != 0);
+    }
+    __except (1) {
     }
 }
 
@@ -355,18 +373,21 @@ static void test_dot32_c() {
         fp64_t sum = 0;
         for (int j = 0; j < i; j++) { sum += a[j] * b[j]; }
         fp64_t sum0 = cpu_dot32_c(a, b, i);
-        fp64_t sum1 = avx2_dot_f32(a, b, i);
-        fatal_if(fabs(sum - sum0) > FLT_EPSILON,
-            "cpu: %.16f expected: %.16f delta: %.16e FLT_EPSILON: %.16e",
-            sum0, sum, sum0 - sum, FLT_EPSILON);
-        fatal_if(fabs(sum1 - sum0) > FLT_EPSILON,
-            "cpu: %.16f avx: %.16f delta: %.16e FLT_EPSILON: %.16e",
-            sum0, sum1, sum0 - sum1, FLT_EPSILON);
-        fp64_t sum2 = avx512_dot_f32(a, b, i);
-        fatal_if(fabs(sum2 - sum0) > FLT_EPSILON,
-            "cpu: %.16f avx: %.16f delta: %.16e FLT_EPSILON: %.16e",
-            sum0, sum2, sum0 - sum2, FLT_EPSILON);
-            (void)sum1; (void)sum2; // unused in release
+        if (avx2.dot32_c != null) {
+            fp64_t sum1 = avx2.dot32_c(a, b, i);
+            fatal_if(fabs(sum - sum0) > FLT_EPSILON,
+                "cpu: %.16f expected: %.16f delta: %.16e FLT_EPSILON: %.16e",
+                sum0, sum, sum0 - sum, FLT_EPSILON);
+            fatal_if(fabs(sum1 - sum0) > FLT_EPSILON,
+                "cpu: %.16f avx: %.16f delta: %.16e FLT_EPSILON: %.16e",
+                sum0, sum1, sum0 - sum1, FLT_EPSILON);
+        }
+        if (avx512.dot32_c != null) {
+            fp64_t sum2 = avx512.dot32_c(a, b, i);
+            fatal_if(fabs(sum2 - sum0) > FLT_EPSILON,
+                "cpu: %.16f avx: %.16f delta: %.16e FLT_EPSILON: %.16e",
+                sum0, sum2, sum0 - sum2, FLT_EPSILON);
+        }
     }
 }
 
@@ -381,18 +402,21 @@ static void test_dot64_c() {
         fp64_t sum = 0;
         for (int j = 0; j < i; j++) { sum += a[j] * b[j]; }
         fp64_t sum0 = cpu_dot64_c(a, b, i);
-        fp64_t sum1 = avx2_dot_f64(a, b, i);
-        fatal_if(fabs(sum - sum0) > DBL_EPSILON,
-            "cpu: %.16f expected: %.16f delta: %.16e DBL_EPSILON: %.16e",
-            sum0, sum, sum0 - sum, DBL_EPSILON);
-        fatal_if(fabs(sum1 - sum0) > DBL_EPSILON,
-            "cpu: %.16f avx: %.16f delta: %.16e DBL_EPSILON: %.16e",
-            sum0, sum1, sum0 - sum1, DBL_EPSILON);
-        fp64_t sum2 = avx512_dot_f64(a, b, i);
-        fatal_if(fabs(sum2 - sum0) > DBL_EPSILON,
-            "cpu: %.16f avx: %.16f delta: %.16e DBL_EPSILON: %.16e",
-            sum0, sum2, sum0 - sum2, DBL_EPSILON);
-            (void)sum1; (void)sum2; // unused in release
+        if (avx2.dot64_c != null) {
+            fp64_t sum1 = avx2.dot64_c(a, b, i);
+            fatal_if(fabs(sum - sum0) > DBL_EPSILON,
+                "cpu: %.16f expected: %.16f delta: %.16e DBL_EPSILON: %.16e",
+                sum0, sum, sum0 - sum, DBL_EPSILON);
+            fatal_if(fabs(sum1 - sum0) > DBL_EPSILON,
+                "cpu: %.16f avx: %.16f delta: %.16e DBL_EPSILON: %.16e",
+                sum0, sum1, sum0 - sum1, DBL_EPSILON);
+        }
+        if (avx512.dot64_c != null) {
+            fp64_t sum2 = avx512.dot64_c(a, b, i);
+            fatal_if(fabs(sum2 - sum0) > DBL_EPSILON,
+                "cpu: %.16f avx: %.16f delta: %.16e DBL_EPSILON: %.16e",
+                sum0, sum2, sum0 - sum2, DBL_EPSILON);
+        }
     }
 }
 
@@ -433,8 +457,8 @@ static void measure_dot16(int n, dot_performance_t* p) {
     fp64_t ns_c = seconds() * NSEC_IN_SEC;
     for (int i = 0; i < n; i++) { t += cpu_dot16_c(a[i], b[i], m); }
     ns_c = seconds() * NSEC_IN_SEC - ns_c;
-    p->ns_c      = ns_c / (n * m);
-    p->ns_avx2   = 0;
+    p->ns_c = ns_c / (n * m);
+    p->ns_avx2 = 0;
     p->ns_avx512 = 0;
     // t referenced to prevent compiler from optimizing out
     fatal_if(t == 0); // what are the odds of that?!
@@ -457,23 +481,27 @@ static void measure_dot32(int n, dot_performance_t* p) {
     }
     // flush caches for n > 1:
     if (n > 1) { fatal_if(flushL1L2L3() == 0); }
-    // AVX-512
-    fp64_t ns_avx512 = seconds() * NSEC_IN_SEC;
-    for (int i = 0; i < n; i++) { t += avx512_dot_f32(a[i], b[i], m); }
-    ns_avx512 = seconds() * NSEC_IN_SEC - ns_avx512;
-    if (n > 1) { fatal_if(flushL1L2L3() == 0); }
-    // AVX-2
-    fp64_t ns_avx2 = seconds() * NSEC_IN_SEC;
-    for (int i = 0; i < n; i++) { t += avx2_dot_f32(a[i], b[i], m); }
-    ns_avx2 = seconds() * NSEC_IN_SEC - ns_avx2;
-    if (n > 1) { fatal_if(flushL1L2L3() == 0); }
     // C
     fp64_t ns_c = seconds() * NSEC_IN_SEC;
     for (int i = 0; i < n; i++) { t += cpu_dot32_c(a[i], b[i], m); }
     ns_c = seconds() * NSEC_IN_SEC - ns_c;
-    p->ns_c      = ns_c      / (n * m);
-    p->ns_avx2   = ns_avx2   / (n * m);
-    p->ns_avx512 = ns_avx512 / (n * m);
+    p->ns_c = ns_c / (n * m);
+    // AVX-2
+    if (avx2.dot32_c != null) {
+        if (n > 1) { fatal_if(flushL1L2L3() == 0); }
+        fp64_t ns_avx2 = seconds() * NSEC_IN_SEC;
+        for (int i = 0; i < n; i++) { t += avx2_dot_f32(a[i], b[i], m); }
+        ns_avx2 = seconds() * NSEC_IN_SEC - ns_avx2;
+        p->ns_avx2 = ns_avx2 / (n * m);
+    }
+    // AVX-512
+    if (avx512.dot32_c != null) {
+        if (n > 1) { fatal_if(flushL1L2L3() == 0); }
+        fp64_t ns_avx512 = seconds() * NSEC_IN_SEC;
+        for (int i = 0; i < n; i++) { t += avx512_dot_f32(a[i], b[i], m); }
+        ns_avx512 = seconds() * NSEC_IN_SEC - ns_avx512;
+        p->ns_avx512 = ns_avx512 / (n * m);
+    }
     // t referenced to prevent compiler from optimizing out
     fatal_if(t == 0); // what are the odds of that?!
     free(b);
@@ -493,25 +521,28 @@ static void measure_dot64(int n, dot_performance_t* p) {
             b[i][j] = random32(&seed) / (fp64_t)UINT32_MAX - 0.5f;
         }
     }
-    // flush caches for n > 1:
-    if (n > 1) { fatal_if(flushL1L2L3() == 0); }
-    // AVX-512
-    fp64_t ns_avx512 = seconds() * NSEC_IN_SEC;
-    for (int i = 0; i < n; i++) { t += avx512_dot_f64(a[i], b[i], m); }
-    ns_avx512 = seconds() * NSEC_IN_SEC - ns_avx512;
-    if (n > 1) { fatal_if(flushL1L2L3() == 0); }
-    // AVX-2
-    fp64_t ns_avx2 = seconds() * NSEC_IN_SEC;
-    for (int i = 0; i < n; i++) { t += avx2_dot_f64(a[i], b[i], m); }
-    ns_avx2 = seconds() * NSEC_IN_SEC - ns_avx2;
-    if (n > 1) { fatal_if(flushL1L2L3() == 0); }
     // C
+    if (n > 1) { fatal_if(flushL1L2L3() == 0); }
     fp64_t ns_c = seconds() * NSEC_IN_SEC;
     for (int i = 0; i < n; i++) { t += cpu_dot64_c(a[i], b[i], m); }
     ns_c = seconds() * NSEC_IN_SEC - ns_c;
-    p->ns_c      = ns_c      / (n * m);
-    p->ns_avx2   = ns_avx2   / (n * m);
-    p->ns_avx512 = ns_avx512 / (n * m);
+    p->ns_c = ns_c / (n * m);
+    // AVX-2
+    if (avx2.dot64_c != null) {
+        if (n > 1) { fatal_if(flushL1L2L3() == 0); }
+        fp64_t ns_avx2 = seconds() * NSEC_IN_SEC;
+        for (int i = 0; i < n; i++) { t += avx2_dot_f64(a[i], b[i], m); }
+        ns_avx2 = seconds() * NSEC_IN_SEC - ns_avx2;
+        p->ns_avx2 = ns_avx2 / (n * m);
+    }
+    // AVX-512
+    if (avx512.dot64_c != null) {
+        if (n > 1) { fatal_if(flushL1L2L3() == 0); }
+        fp64_t ns_avx512 = seconds() * NSEC_IN_SEC;
+        for (int i = 0; i < n; i++) { t += avx512_dot_f64(a[i], b[i], m); }
+        ns_avx512 = seconds() * NSEC_IN_SEC - ns_avx512;
+        p->ns_avx512 = ns_avx512 / (n * m);
+    }
     // t referenced to prevent compiler from optimizing out
     fatal_if(t == 0); // what are the odds of that?!
     free(b);
@@ -555,7 +586,13 @@ static void dot_test_performance() {
     if (p.ns_c != 0) exit(1);
 }
 
+void dot_init() {
+    static bool init;
+    if (!init) { avx2.init(); avx512.init(); init = true; }
+}
+
 void dot_test() {
+    dot_init();
     test_dot32_c();
     test_dot64_c();
     dot_test_performance();

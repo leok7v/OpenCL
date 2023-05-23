@@ -28,17 +28,13 @@
 // dot_fp16x16_2()
 // TODO: measure which one is faster
 
-//#if __OPENCL_VERSION__ <= CL_VERSION_1_1
-//#pragma OPENCL EXTENSION cl_khr_fp64: enable
-//#endif
-
-#ifdef cl_khr_fp64
-    #pragma OPENCL EXTENSION cl_khr_fp64: enable
-#elif defined(cl_amd_fp64)
-    #pragma OPENCL EXTENSION cl_amd_fp64 : enable
+#if __OPENCL_VERSION__ <= CL_VERSION_1_1
+#pragma OPENCL EXTENSION cl_khr_fp64: enable
 #endif
 
+#ifdef cl_khr_fp16
 #pragma OPENCL EXTENSION cl_khr_fp16: enable
+#endif
 
 #define _concat_(first, last)  first ##_## last
 #define name(first, last)      _concat_(first, last)
