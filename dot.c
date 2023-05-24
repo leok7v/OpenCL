@@ -119,7 +119,7 @@ static fp64_t dot64_c(const fp64_t *v0, const fp64_t* v1, int64_t n) {
 }
 
 fp64_t dot16(const fp16_t* v0, int64_t s0, const fp16_t* v1, int64_t s1, int64_t n) {
-    if (s0 == 1 && s1 == 0) {
+    if (s0 == 1 && s1 == 1) {
         return dot16_c(v0, v1, n);
     } else {
         return cpu_dot16_s(v0, s0, v1, s1, n);
@@ -127,7 +127,7 @@ fp64_t dot16(const fp16_t* v0, int64_t s0, const fp16_t* v1, int64_t s1, int64_t
 }
 
 fp64_t dot32(const fp32_t* v0, int64_t s0, const fp32_t* v1, int64_t s1, int64_t n) {
-    if (s0 == 1 && s1 == 0) {
+    if (s0 == 1 && s1 == 1) {
         return dot32_c(v0, v1, n);
     } else {
         return cpu_dot32_s(v0, s0, v1, s1, n);
@@ -135,7 +135,7 @@ fp64_t dot32(const fp32_t* v0, int64_t s0, const fp32_t* v1, int64_t s1, int64_t
 }
 
 fp64_t dot64(const fp64_t* v0, int64_t s0, const fp64_t* v1, int64_t s1, int64_t n) {
-    if (s0 == 1 && s1 == 0) {
+    if (s0 == 1 && s1 == 1) {
         return dot64_c(v0, v1, n);
     } else {
         return cpu_dot64_s(v0, s0, v1, s1, n);

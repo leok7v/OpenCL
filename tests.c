@@ -1,7 +1,6 @@
 #include "rt.h"
 #include "blast.h"
-#include "blast.h"
-#include <CL/opencl.h>
+#include "dot.h"
 
 // TODO: test 1..16 all types, test permutations of offset and shift, test limited max_items = 4, max_groups = 2, test huge, test performance
 
@@ -86,13 +85,13 @@ static void test_first_n(blast_t* b, int64_t n, int fpp,
     test_dot_free(&td);
     td.rse = td.expected - td.dot;
     td.rse = sqrt(td.rse * td.rse);
-    if (verbose || td.rse > CL_DBL_EPSILON) {
+    if (verbose || td.rse > FLT_EPSILON) {
         traceln("%s[%2d] [o:%2d s:%2d] [o:%2d s:%2d] "
                 "%25.17f expected: %25.17f rse: %.17f",
                 blast_fpp_names[fpp], n, o0, s0, o1, s1,
                 td.dot, td.expected, td.rse);
     }
-    fatal_if(td.rse > CL_DBL_EPSILON);
+    fatal_if(td.rse > FLT_EPSILON);
 }
 
 static void test_permutations(blast_t* b) {
@@ -149,17 +148,44 @@ static void test_performance(blast_t* b, const int32_t n) {
     blast.deallocate(&m0);
     blast.deallocate(&m1);
     double rse = sqrt(pow(dot - sum, 2));
-    if (rse > CL_DBL_EPSILON) {
+    if (rse > FLT_EPSILON) {
         traceln("n: %d dot: %.7E sum: %.7E sum - dot: %.7E rse: %.7E\n",
                     n, dot, sum, sum - dot, rse);
     }
-    assert(fabs(dot - sum) <= CL_DBL_EPSILON, "dot: %.7e != %.7e\n", dot, sum);
+    assert(fabs(dot - sum) <= FLT_EPSILON, "dot: %.7e != %.7e\n", dot, sum);
 }
 
-static void test_dot_compare_gpu_avx() {
+static void test_dot_compare_gpu_avx(blast_t* b) {
+    enum { n = 16 * 1024 * 1024 };
+    test_dot_t td = test_dot_alloc(b, blast_fpp32, n, n);
+    test_dot_map(&td);
+    fp32_t* x = (fp32_t*)td.a0;
+    fp32_t* y = (fp32_t*)td.a1;
+    fp32_t delta = (fp32_t)(1.0 / (double)(1ULL << 63));
+    for (int64_t i = 0; i < n; i++) {
+        fp32_t sign = (i % 2 == 0 ? -1.0f : +1.f);
+        x[i] = 1.0f + sign * ((i + 1) * delta);
+        y[i] = 1.0f - sign * ((i + 1) * delta);
+        assert(x[i] * y[i] == 1.0f);
+    }
+    traceln("Nx1000,   AVX,     GPU, milliseconds");
+    for (int i = 4096; i < n / 1024; i += 512) {
+        double avx = seconds();
+        fp64_t sum0 = dot32(x, 1, y, 1, i * 1024);
+        avx = seconds() - avx;
+        test_dot_unmap(&td);
+        double gpu = seconds();
+        fp64_t sum1 = b->dot[blast_fpp32](&td.v0, 0, 1, &td.v1, 0, 1, i * 1024);
+        gpu = seconds() - gpu;
+        test_dot_map(&td);
+        x = (fp32_t*)td.a0;
+        y = (fp32_t*)td.a1;
+        traceln("%6d, %5.3f, %7.3f", i, avx * MSEC_IN_SEC, gpu * MSEC_IN_SEC);
+        fatal_if(sum0 != sum1);
+    }
+    test_dot_unmap(&td);
+    test_dot_free(&td);
 }
-
-void dot_test();
 
 static void dot_tests() {
     dot_test();
@@ -198,17 +224,22 @@ static void dot_tests() {
         blast.fini(&b);
         ocl.close(&c);
     }
+    for (int d = 0; d < ocl.count; d++) {
+        static ocl_profiling_t p[16 * 1024];
+        static ocl_override_t ov = {
+            .profiling = p,
+            .max_profiling_count = countof(p),
+            .profiling_count = 0,
+        };
+        ocl_context_t c = ocl.open(d, &ov);
+        traceln("%s", ocl.devices[d].name);
+        blast_t b = { 0 };
+        blast.init(&b, &c);
+        test_dot_compare_gpu_avx(&b);
+        blast.fini(&b);
+        ocl.close(&c);
+    }
 }
-
-/*
-
-NVIDIA GeForce RTX 3080 Laptop GPU
-dot_fp32 x 16,777,216:   5.413 user:  12.988 (ms) GFlops: 111.254
-
-Intel(R) UHD Graphics
-dot_fp32 x 16,777,216:  12.171 user: 779.006 (ms) GFlops:  44.923
-
-*/
 
 int32_t main(int32_t argc, const char* argv[]) {
     (void)argc; (void)argv;
@@ -216,3 +247,94 @@ int32_t main(int32_t argc, const char* argv[]) {
     dot_tests();
     return 0;
 }
+
+/*
+
+    11th Gen Intel(R) Core(TM) i7-11800H @ 2.30GHz / 4.00 GHz
+
+    fp16 L1
+    C     :   0.315 Gflops
+    fp16 RAM
+    C     :   0.306 Gflops
+
+    fp32 L1
+    C     :   2.254 Gflops
+    avx2  :  17.955 Gflops
+    avx512:  22.029 Gflops
+
+    fp32 RAM
+    C     :   2.232 Gflops
+    avx2  :   6.974 Gflops
+    avx512:   5.936 Gflops
+
+    fp64 L1
+    C     :   2.248 Gflops
+    avx2  :   9.039 Gflops
+    avx512:  11.015 Gflops
+
+    fp64 RAM
+    C     :   2.177 Gflops
+    avx2  :   3.483 Gflops
+    avx512:   2.980 Gflops (note: something wrong with fp64 prefetch)
+
+
+NVIDIA GeForce RTX 3080 Laptop GPU
+dot_fp32 x 16,777,216:   5.413 user:  12.988 (ms) GFlops: 111.254
+
+Intel(R) UHD Graphics
+dot_fp32 x 16,777,216:  12.171 user: 779.006 (ms) GFlops:  44.923
+
+Nx1000,   AVX,     GPU, millisecond
+  4096, 1.605,  27.338
+  4608, 1.909,  28.990
+  5120, 1.990,  29.465
+  5632, 2.203,  29.602
+  6144, 2.328,  29.690
+  6656, 2.528,  32.793
+  7168, 3.289,  33.768
+  7680, 3.172,  35.278
+  8192, 4.212,  33.517
+  8704, 3.458,  33.645
+  9216, 3.952,  35.780
+  9728, 3.784,  39.720
+ 10240, 5.181,  38.146
+ 10752, 5.377,  38.698
+ 11264, 4.361,  38.514
+ 11776, 4.825,  40.229
+ 12288, 4.929,  39.591
+ 12800, 4.961,  41.711
+ 13312, 6.921,  43.100
+ 13824, 5.600,  46.037
+ 14336, 5.796,  46.795
+ 14848, 5.828,  46.704
+ 15360, 5.994,  47.089
+ 15872, 8.071,  46.622
+
+Intel(R) UHD Graphics i7-11800H
+Nx1000,   AVX,     GPU, millisecond
+  4096, 1.612, 226.997
+  4608, 1.837, 246.279
+  5120, 2.099, 274.806
+  5632, 2.543, 301.524
+  6144, 2.333, 323.371
+  6656, 2.472, 348.716
+  7168, 2.931, 383.605
+  7680, 3.066, 407.997
+  8192, 3.182, 433.629
+  8704, 3.302, 454.198
+  9216, 3.390, 495.033
+  9728, 3.723, 505.975
+ 10240, 3.911, 548.299
+ 10752, 4.043, 569.160
+ 11264, 4.336, 577.827
+ 11776, 4.409, 630.333
+ 12288, 5.801, 655.570
+ 12800, 4.811, 676.025
+ 13312, 5.014, 705.027
+ 13824, 5.334, 731.948
+ 14336, 5.941, 761.361
+ 14848, 5.954, 808.245
+ 15360, 5.909, 836.726
+ 15872, 6.261, 842.422
+
+ */

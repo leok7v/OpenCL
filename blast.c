@@ -157,18 +157,23 @@ static fp64_t sum_and_finish(blast_memory_t* v, int64_t items, int64_t groups, i
         blast_memory_t  s = blast.allocate(v->b, blast_access_read, bytes);
         blast_memory_t* v0 = v;
         blast_memory_t* v1 = &s;
+        const int64_t max_items  = ocl.devices[c->ix].max_items[0];
         while (m >= 1) {
+            if (m < max_items) {
+                groups = 1; items = m;
+            } else if (groups > 1 && groups % 2 == 0) {
+                groups >>= 1;
+            } else if (items > 1 && items % 2 == 0) {
+                items  >>= 1;
+            } else {
+                assert(false);
+            }
+            assertion(groups * items == m);
             ocl_arg_t args[] = {
                 {&v0->h,  sizeof(ocl_memory_t)},
                 {&v1->h,  sizeof(ocl_memory_t)}
             };
             ocl_kernel_t k = n % 2 == 0 ? b->sum_even[fpp] : b->sum_odd[fpp];
-            if (groups > 1) {
-                groups >>= 1;
-            } else if (items  > 0) {
-                items  >>= 1;
-            }
-            assertion(groups * items == m);
             double user = ocl.is_profiling(c) ? seconds() : 0;
             ocl_event_t e = ocl.enqueue_range_kernel(c, k, groups, items,
                 countof(args), args);
@@ -201,8 +206,11 @@ static fp64_t blast_dot(
     blast_t* b = v0->b;
     ocl_context_t* c = b->c;
     fp64_t s = 0;
-    int64_t max_groups = ocl.devices[c->ix].max_groups;
-    int64_t max_items  = ocl.devices[c->ix].max_items[0];
+    const int64_t max_groups = ocl.devices[c->ix].max_groups;
+    const int64_t max_items  = ocl.devices[c->ix].max_items[0];
+    // sum relies on max_* being power of 2
+    assert((max_items  & (max_items  - 1)) == 0);
+    assert((max_groups & (max_groups - 1)) == 0);
     if (ocl.is_profiling(c)) {
         c->ov->profiling_count = 0;
     }
