@@ -58,11 +58,9 @@ static ocl_context_t ocl_open(int32_t ix, ocl_override_t* ov) {
         ov->max_items_restore  = d->max_items[0];
         if (0 < ov->max_groups && ov->max_groups < d->max_groups) {
             d->max_groups = ov->max_groups;
-            traceln("device[%d] max_items: %lld overriden", ix, d->max_groups);
         }
         if (0 < ov->max_items && ov->max_items < d->max_items[0]) {
             d->max_items[0] = ov->max_items;
-            traceln("device[%d] max_items: %lld overriden", ix, d->max_items[0]);
         }
     }
     return c;

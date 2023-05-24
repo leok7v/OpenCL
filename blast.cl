@@ -32,7 +32,7 @@
 #pragma OPENCL EXTENSION cl_khr_fp64: enable
 #endif
 
-#ifdef cl_khr_fp16
+#ifdef fp16_t
 #pragma OPENCL EXTENSION cl_khr_fp16: enable
 #endif
 
@@ -192,7 +192,7 @@ __kernel void name(gemv_os, suffix)(
     r[i] = s;
 }
 
-#if defined(fp16_surrogate)
+#if defined(fp16_t) && defined(fp16_surrogate)
 
 #define fp16ro_t __global const fp16_t*
 #define fp16wr_t __global fp16_t*

@@ -1,6 +1,11 @@
 #pragma once
 #include "rt.h"
 
+// TODO: mf8_t  https://en.wikipedia.org/wiki/Minifloat
+// TODO: bf16_t https://en.wikipedia.org/wiki/Bfloat16_floating-point_format
+// AVX512 support both fp16 and bf16 but only on three (server grade) processors so far
+// https://en.wikichip.org/wiki/x86/avx512_bf16
+
 // https://en.wikipedia.org/wiki/Half-precision_floating-point_format
 
 typedef begin_packed struct _fp16_u_ {

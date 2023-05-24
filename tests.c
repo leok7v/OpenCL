@@ -21,12 +21,13 @@ typedef struct test_dot_s {
     double rse; // root square error
 } test_dot_t;
 
-static void test_dot_alloc(blast_t* b, test_dot_t* td, int fpp,
-        int64_t n0, int64_t n1) {
-    td->bytes0 = n0 * sizes[fpp];
-    td->bytes1 = n1 * sizes[fpp];
-    td->v0 = blast.allocate(b, blast_access_write, td->bytes0);
-    td->v1 = blast.allocate(b, blast_access_write, td->bytes1);
+static test_dot_t test_dot_alloc(blast_t* b, int fpp, int64_t n0, int64_t n1) {
+    test_dot_t td = {0};
+    td.bytes0 = n0 * sizes[fpp];
+    td.bytes1 = n1 * sizes[fpp];
+    td.v0 = blast.allocate(b, blast_access_write, td.bytes0);
+    td.v1 = blast.allocate(b, blast_access_write, td.bytes1);
+    return td;
 }
 
 static void test_dot_map(test_dot_t* td) {
@@ -52,8 +53,7 @@ static void test_first_n(blast_t* b, int64_t n, int fpp,
     #pragma push_macro("at1")
     #define at0(type, i) ((type*)td.a0 + o0 + i * s0)
     #define at1(type, i) ((type*)td.a1 + o1 + i * s1)
-    test_dot_t td = {0};
-    test_dot_alloc(b, &td, fpp, o0 + n * s0, o1 + n * s1);
+    test_dot_t td = test_dot_alloc(b, fpp, o0 + n * s0, o1 + n * s1);
     test_dot_map(&td);
     // init memory by garbage
     for (int i = 0; i < td.bytes0; i++) {
@@ -95,130 +95,120 @@ static void test_first_n(blast_t* b, int64_t n, int fpp,
     fatal_if(td.rse > CL_DBL_EPSILON);
 }
 
-static void test_permutations() {
-    ocl_override_t ov0 = {
-        .max_groups = 2,
-        .max_items = 4
-    };
-    for (int i = 0; i < ocl.count; i++) {
-        ocl.dump(i);
-        ocl_context_t c = ocl.open(i, &ov0); // test on small groups/items
-        traceln("%s\n", ocl.devices[i].name);
-        blast_t b = { 0 };
-        blast.init(&b, &c);
-        for (int n = 1; n < 7; n++) {
-            for (int fpp = blast_fpp16; fpp <= blast_fpp64; fpp++) {
-                if (b.dot[fpp] != null) {
-                    for (int o0 = 0; o0 < 3; o0++) {
-                        for (int o1 = 0; o1 < 3; o1++) {
-                            for (int s0 = 1; s0 < 3; s0++) {
-                                for (int s1 = 1; s1 < 3; s1++) {
-                                    test_first_n(&b, n, fpp, o0, s0, o1, s1, false);
-                                }
+static void test_permutations(blast_t* b) {
+    for (int n = 1; n < 7; n++) {
+        for (int fpp = blast_fpp16; fpp <= blast_fpp64; fpp++) {
+            if (b->dot[fpp] != null) {
+                for (int o0 = 0; o0 < 4; o0++) {
+                    for (int o1 = 0; o1 < 4; o1++) {
+                        for (int s0 = 1; s0 < 3; s0++) {
+                            for (int s1 = 1; s1 < 3; s1++) {
+                                test_first_n(b, n, fpp, o0, s0, o1, s1, false);
                             }
                         }
                     }
                 }
             }
         }
-        blast.fini(&b);
-        ocl.close(&c);
     }
-    ocl_override_t ov1 = {
-        .max_groups = 2,
-        .max_items = 3
-    };
-    for (int i = 0; i < ocl.count; i++) {
-        ocl_context_t c = ocl.open(i, &ov1); // test on small groups/items
-        traceln("%s\n", ocl.devices[i].name);
-        blast_t b = { 0 };
-        blast.init(&b, &c);
-        for (int n = 1; n < 11; n++) {
-            for (int fpp = blast_fpp16; fpp <= blast_fpp64; fpp++) {
-//              traceln("%s n: %d", blast_fpp_names[fpp], n);
-                if (b.dot[fpp] != null) {
-                    for (int o0 = 0; o0 < 4; o0++) {
-                        for (int o1 = 0; o1 < 4; o1++) {
-                            for (int s0 = 1; s0 < 3; s0++) {
-                                for (int s1 = 1; s1 < 3; s1++) {
-                                    test_first_n(&b, n, fpp, o0, s0, o1, s1, false);
-                                }
+    for (int n = 1; n < 11; n++) {
+        for (int fpp = blast_fpp16; fpp <= blast_fpp64; fpp++) {
+            if (b->dot[fpp] != null) {
+                for (int o0 = 0; o0 < 4; o0++) {
+                    for (int o1 = 0; o1 < 4; o1++) {
+                        for (int s0 = 1; s0 < 3; s0++) {
+                            for (int s1 = 1; s1 < 3; s1++) {
+                                test_first_n(b, n, fpp, o0, s0, o1, s1, false);
                             }
                         }
                     }
                 }
             }
         }
-        blast.fini(&b);
-        ocl.close(&c);
     }
 }
 
-static void test_performance() {
-//  enum { N = 16 * 1024 * 1024 + };  // TODO: fails at N = 16 * 1024 * 1024 + 1
-    enum { N = 16 * 1024 * 1024 };
-    static ocl_profiling_t p[16 * 1024]; // max 4K kernel invocations measurement
-    ocl_override_t ov = {
-        .profiling = p,
-        .max_profiling_count = countof(p),
-        .profiling_count = 0
-    };
-    // profiling measurement:
-    for (int d = 0; d < ocl.count; d++) {
-        ocl_context_t c = ocl.open(d, &ov);
-        traceln("%s\n", ocl.devices[d].name);
-        blast_t b = { 0 };
-        blast.init(&b, &c);
-        double err = 0;
-        const int64_t bytes = N * sizeof(fp32_t);
-        blast_memory_t m0 = blast.allocate(&b, blast_access_write, bytes);
-        blast_memory_t m1 = blast.allocate(&b, blast_access_write, bytes);
-        fp32_t* x = (fp32_t*)blast.map(&m0, blast_access_write, 0, bytes);
-        fp32_t* y = (fp32_t*)blast.map(&m1, blast_access_write, 0, bytes);
-        fp32_t delta = 1.0f / (1 << 20);
-        delta *= delta;
-        fp32_t sum = 0;
-        for (int64_t i = 0; i < N; i++) {
-            fp32_t sign = (i % 2 == 0 ? -1.0f : +1.f);
-            x[i] = 1.0f + sign * (i * delta);
-            y[i] = 1.0f - sign * (i * delta);
-//          traceln("%f %f %f", x[i], y[i], x[i] * y[i]);
-            sum += x[i] * y[i];
-        }
-//      traceln("sum: %15.7e delta: %15.7e", sum, delta);
-        blast.unmap(&m1);
-        blast.unmap(&m0);
-        double host = seconds();
-        fp64_t dot = b.dot[blast_fpp32](&m0, 0, 1, &m1, 0, 1, N);
-        host = seconds() - host;
-        blast.deallocate(&m0);
-        blast.deallocate(&m1);
-        double rse = sqrt(pow(dot - sum, 2)) / sum;
-//      traceln("n: %d dot: %.7f  sum: %.7F rse: %.7f\n", N, dot, sum, rse);
-        if (rse > err) {
-            if (rse > CL_DBL_EPSILON) {
-                traceln("n: %d dot: %.7f  sum: %.7F rse: %.7f\n", N, dot, sum, rse);
-                traceln("n: %d dot: %.7e  sum: %.7e rse: %.7e\n", N, dot, sum, rse);
-            }
-            err = rse;
-        }
-        assert(fabs(dot - sum) <= CL_DBL_EPSILON, "dot_product(): %.7e != %.7e\n", dot, sum);
-        traceln("dot_fp32 kernel x %lld: %.3f user: %.3f host: %.3f ms Gflops: %.6f",
-            N, p->time * MSEC_IN_SEC, p->user * MSEC_IN_SEC, host * MSEC_IN_SEC, p->gflops);
-//      traceln("max rse: %.7e %.17f\n", err, err);
-        blast.fini(&b);
-        // see: add.c for averaging
-        ocl.close(&c);
+static void test_performance(blast_t* b, const int32_t n) {
+    const int64_t bytes = n * sizeof(fp32_t);
+    blast_memory_t m0 = blast.allocate(b, blast_access_write, bytes);
+    blast_memory_t m1 = blast.allocate(b, blast_access_write, bytes);
+    fp32_t* x = (fp32_t*)blast.map(&m0, blast_access_write, 0, bytes);
+    fp32_t* y = (fp32_t*)blast.map(&m1, blast_access_write, 0, bytes);
+    fp32_t delta = (fp32_t)(1.0 / (double)(1ULL << 63));
+    fp32_t sum = 0;
+    for (int64_t i = 0; i < n; i++) {
+        fp32_t sign = (i % 2 == 0 ? -1.0f : +1.f);
+        x[i] = 1.0f + sign * ((i + 1) * delta);
+        y[i] = 1.0f - sign * ((i + 1) * delta);
+        assert(x[i] * y[i] == 1.0f);
+        sum += x[i] * y[i];
     }
+    blast.unmap(&m1);
+    blast.unmap(&m0);
+    fp64_t dot = b->dot[blast_fpp32](&m0, 0, 1, &m1, 0, 1, n);
+    blast.deallocate(&m0);
+    blast.deallocate(&m1);
+    double rse = sqrt(pow(dot - sum, 2));
+    if (rse > CL_DBL_EPSILON) {
+        traceln("n: %d dot: %.7E sum: %.7E sum - dot: %.7E rse: %.7E\n",
+                    n, dot, sum, sum - dot, rse);
+    }
+    assert(fabs(dot - sum) <= CL_DBL_EPSILON, "dot: %.7e != %.7e\n", dot, sum);
+}
+
+static void test_dot_compare_gpu_avx() {
 }
 
 void dot_test();
 
 static void dot_tests() {
-//  dot_test();
-    test_permutations();
-//  test_performance();
+    dot_test();
+    for (int d = 0; d < ocl.count; d++) {
+//      ocl.dump(i);
+        static ocl_override_t ov[2] = {
+            { .max_groups = 2, .max_items = 4 },
+            { .max_groups = 2, .max_items = 3 }
+        };
+        for (int i = 0; i < 2; i++) {
+            ocl_context_t c = ocl.open(d, &ov[i]);
+            blast_t b = { 0 };
+            blast.init(&b, &c);
+            test_permutations(&b);
+            blast.fini(&b);
+            ocl.close(&c);
+        }
+    }
+    for (int d = 0; d < ocl.count; d++) {
+        static ocl_profiling_t p[16 * 1024];
+        static ocl_override_t ov = {
+            .profiling = p,
+            .max_profiling_count = countof(p),
+            .profiling_count = 0,
+        };
+        ocl_context_t c = ocl.open(d, &ov);
+        traceln("%s", ocl.devices[d].name);
+        blast_t b = { 0 };
+        blast.init(&b, &c);
+        // because fp32 have 24 binary digits significand and 2^24 is 16M:
+        // 16M is the largest number w/o losing precision
+        enum { n = 16 * 1024 * 1024 };
+        test_performance(&b, n);
+        traceln("dot_fp32 x %d: %7.3f user: %7.3f (ms) GFlops: %7.3f", n,
+            p[0].time * MSEC_IN_SEC, p[0].user * MSEC_IN_SEC, p[0].gflops);
+        blast.fini(&b);
+        ocl.close(&c);
+    }
 }
+
+/*
+
+NVIDIA GeForce RTX 3080 Laptop GPU
+dot_fp32 x 16,777,216:   5.413 user:  12.988 (ms) GFlops: 111.254
+
+Intel(R) UHD Graphics
+dot_fp32 x 16,777,216:  12.171 user: 779.006 (ms) GFlops:  44.923
+
+*/
 
 int32_t main(int32_t argc, const char* argv[]) {
     (void)argc; (void)argv;

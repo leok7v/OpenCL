@@ -33,8 +33,6 @@ typedef struct blast_s {
     // The offset parameters could be useful when multiple tensors reside in
     // a single memory region.
     // The function pointers below can be null if fp16 or fp64 is not supported:
-    // sum()
-    fp64_t (*sum[3])(blast_memory_t* v0, int64_t offset0, int64_t stride0,int64_t n);
     // dot()
     fp64_t (*dot[3])(
         blast_memory_t* v0, int64_t offset0, int64_t stride0,
